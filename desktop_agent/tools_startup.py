@@ -2,9 +2,9 @@
 Windows auto-start management for MYRAA (V2).
 
 Manages a single registry entry under
-    HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\Myraa
-which points directly at the packaged MYRAA executable. Source-development
-builds fall back to start-myraa-silent.bat. HKCU is used (no admin rights
+    HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\Sara
+which points directly at the packaged Sara executable. Source-development
+builds fall back to start-sara-silent.bat. HKCU is used (no admin rights
 required) and the change is per-user.
 
 Tools:
@@ -25,8 +25,10 @@ from typing import Any, Dict
 from .registry import ToolError, register
 
 RUN_KEY_PATH = r"Software\\Microsoft\\Windows\\CurrentVersion\\Run"
-VALUE_NAME = "Myraa"
-SILENT_LAUNCHER = "start-myraa-silent.bat"
+VALUE_NAME = "Sara"
+LEGACY_VALUE_NAME = "Myraa"
+SILENT_LAUNCHER = "start-sara-silent.bat"
+LEGACY_SILENT_LAUNCHER = "start-myraa-silent.bat"
 
 
 def _project_root() -> str:
@@ -41,7 +43,7 @@ def _launcher_path() -> str:
 
 def _ensure_launcher_exists() -> str:
     """
-    Make sure start-myraa-silent.bat exists in the project root.
+    Make sure start-sara-silent.bat exists in the project root.
     If missing, write a minimal silent launcher so auto-start never breaks.
     """
     path = _launcher_path()
@@ -87,7 +89,7 @@ def _startup_command() -> tuple[str, str]:
     path keeps auto-start independent of Node, npm, Python, project folders,
     and terminal windows.
     """
-    packaged_executable = os.environ.get("MYRAA_EXECUTABLE", "").strip().strip('"')
+    packaged_executable = (os.environ.get("SARA_EXECUTABLE") or os.environ.get("MYRAA_EXECUTABLE", "")).strip().strip('"')
     if packaged_executable and os.path.isfile(packaged_executable):
         return f'"{packaged_executable}"', packaged_executable
     launcher = _ensure_launcher_exists()
@@ -125,7 +127,10 @@ def _read_run_value() -> str | None:
         with winreg.OpenKey(
             winreg.HKEY_CURRENT_USER, RUN_KEY_PATH, 0, winreg.KEY_READ
         ) as key:
-            value, _ = winreg.QueryValueEx(key, VALUE_NAME)
+            try:
+                value, _ = winreg.QueryValueEx(key, VALUE_NAME)
+            except FileNotFoundError:
+                value, _ = winreg.QueryValueEx(key, LEGACY_VALUE_NAME)
             return str(value)
     except FileNotFoundError:
         return None
@@ -148,6 +153,10 @@ def enable_auto_start(args: Dict[str, Any]) -> Dict[str, Any]:
     try:
         with _open_run_key() as key:
             winreg.SetValueEx(key, VALUE_NAME, 0, winreg.REG_SZ, command)
+            try:
+                winreg.DeleteValue(key, LEGACY_VALUE_NAME)
+            except FileNotFoundError:
+                pass
     except OSError as e:
         raise ToolError(f"Could not write startup registry entry: {e}") from e
 
@@ -164,16 +173,17 @@ def disable_auto_start(args: Dict[str, Any]) -> Dict[str, Any]:
     """Remove the Windows startup entry."""
     if not _is_windows():
         raise ToolError("Auto-start is only supported on Windows.")
-    existing = _read_run_value()
-    if existing is None:
-        return {"result": "Auto-start was already disabled.", "enabled": False}
     import winreg  # type: ignore[import-not-found]
 
     try:
         with winreg.OpenKey(
             winreg.HKEY_CURRENT_USER, RUN_KEY_PATH, 0, winreg.KEY_SET_VALUE
         ) as key:
-            winreg.DeleteValue(key, VALUE_NAME)
+            for name in (VALUE_NAME, LEGACY_VALUE_NAME):
+                try:
+                    winreg.DeleteValue(key, name)
+                except FileNotFoundError:
+                    pass
     except FileNotFoundError:
         return {"result": "Auto-start was already disabled.", "enabled": False}
     except OSError as e:

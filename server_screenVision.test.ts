@@ -4,6 +4,7 @@ import {
   ScreenVisionPipeline,
   detectScreenVisionIntent,
   type ScreenVisionFrame,
+  isPrivacySensitiveWindow,
 } from "./server_screenVision";
 
 const IMAGE = Buffer.from("screen-frame").toString("base64");
@@ -121,5 +122,59 @@ test("reports realtime injection failure without crashing", async () => {
   assert.equal(pipeline.injectFrame(frame as ScreenVisionFrame), false);
   assert.equal(states.at(-1)?.state, "error");
   assert.match(states.at(-1)?.error || "", /does not accept images/);
+  pipeline.dispose();
+});
+
+test("does not inject identical frames repeatedly during continuous sharing", async () => {
+  let pushes = 0;
+  const pipeline = new ScreenVisionPipeline({
+    callAgent: async () => ({ ok: true, result: payload() }),
+    pushFrameToSession: () => { pushes += 1; },
+  });
+
+  const frame = await pipeline.capture();
+  assert.ok(frame);
+  assert.equal(pipeline.injectFrame(frame as ScreenVisionFrame), true);
+  assert.equal(pipeline.injectFrame(frame as ScreenVisionFrame), true);
+  assert.equal(pushes, 1);
+  pipeline.dispose();
+});
+
+test("records capture, injection, duplicate, and backpressure metrics", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const pipeline = new ScreenVisionPipeline({
+    callAgent: async () => { await gate; return { ok: true, result: payload() }; },
+    pushFrameToSession: () => {},
+  });
+  const pending = pipeline.capture();
+  void pipeline.capture();
+  release();
+  const frame = await pending;
+  pipeline.injectFrame(frame as ScreenVisionFrame);
+  pipeline.injectFrame(frame as ScreenVisionFrame);
+  const metrics = pipeline.getMetrics();
+  assert.equal(metrics.captured, 1);
+  assert.equal(metrics.injected, 1);
+  assert.equal(metrics.duplicateFrames, 1);
+  assert.equal(metrics.droppedWhileBusy, 1);
+  pipeline.dispose();
+});
+
+test("recognizes privacy-sensitive windows before cloud upload", () => {
+  assert.equal(isPrivacySensitiveWindow("Bank payment - Checkout"), true);
+  assert.equal(isPrivacySensitiveWindow("Visual Studio Code"), false);
+  assert.equal(isPrivacySensitiveWindow("My private app", [/private app/i]), true);
+});
+
+test("blocks injection for privacy-sensitive windows", async () => {
+  let pushes = 0;
+  const pipeline = new ScreenVisionPipeline({
+    callAgent: async () => ({ ok: true, result: payload({ active_window: "Password sign-in" }) }),
+    pushFrameToSession: () => { pushes += 1; },
+  });
+  const frame = await pipeline.capture();
+  assert.equal(pipeline.injectFrame(frame as ScreenVisionFrame), false);
+  assert.equal(pushes, 0);
   pipeline.dispose();
 });

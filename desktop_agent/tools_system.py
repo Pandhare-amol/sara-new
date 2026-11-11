@@ -35,6 +35,15 @@ def system_info(args: Dict[str, Any]) -> Dict[str, Any]:
     ram_total = vm.total
     ram_used = vm.used
     ram_percent = vm.percent
+    processes = []
+    try:
+        for process in psutil.process_iter(["pid", "name", "memory_info", "status"]):
+            info = process.info
+            memory = info.get("memory_info")
+            processes.append({"pid": int(info["pid"]), "name": info.get("name") or "unknown", "memory_bytes": int(memory.rss) if memory else 0, "status": info.get("status")})
+        processes.sort(key=lambda item: item["memory_bytes"], reverse=True)
+    except Exception:
+        processes = []
 
     # Disk usage on the system drive (and project drive if different).
     disks: Dict[str, Dict[str, Any]] = {}
@@ -70,8 +79,9 @@ def system_info(args: Dict[str, Any]) -> Dict[str, Any]:
             f"{len(disks)} disk(s) monitored. Uptime {uptime}."
         ),
         "cpu": {"percent": cpu_percent, "physical_cores": cpu_count_physical, "logical_cores": cpu_count_logical},
-        "ram": {"percent": ram_percent, "used": _bytes_human(ram_used), "total": _bytes_human(ram_total)},
+        "ram": {"percent": ram_percent, "used": _bytes_human(ram_used), "available": _bytes_human(vm.available), "total": _bytes_human(ram_total)},
         "disks": disks,
+        "top_processes": processes[:15],
         "uptime_seconds": int(uptime.total_seconds()),
         "os": platform.platform(),
     }

@@ -45,6 +45,7 @@ export function writeJsonFile(file: string, value: unknown): Promise<void> {
 export class DebouncedJsonWriter {
   private timer: NodeJS.Timeout | null = null;
   private pending: (() => unknown) | null = null;
+  private inFlight: Promise<void> = Promise.resolve();
 
   constructor(private readonly file: string, private readonly delayMs = 400) {}
 
@@ -65,6 +66,10 @@ export class DebouncedJsonWriter {
     }
     const snapshot = this.pending;
     this.pending = null;
-    if (snapshot) await writeJsonFile(this.file, snapshot());
+    // A terminal transition can request a flush while an earlier flush is
+    // still writing. Chain writes so callers awaiting flush() never race the
+    // previous atomic rename and accidentally read stale task state.
+    if (snapshot) this.inFlight = this.inFlight.then(() => writeJsonFile(this.file, snapshot()));
+    await this.inFlight;
   }
 }

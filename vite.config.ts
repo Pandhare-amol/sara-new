@@ -25,6 +25,8 @@ export default defineConfig(() => {
           manualChunks: {
             three: ['three'],
             character: ['mmd-parser'],
+            dashboard: ['./src/components/SystemDashboard.tsx'],
+            settings: ['./src/components/SettingsPanel.tsx'],
           },
         },
       },

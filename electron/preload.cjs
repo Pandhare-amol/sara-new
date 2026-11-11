@@ -27,14 +27,35 @@ async function getDesktopCaptureSources() {
   }
 }
 
-contextBridge.exposeInMainWorld('myraa', {
+const saraBridge = {
   isDesktop: true,
   platform: process.platform,
   version: process.versions.electron,
   // Serializable source metadata only; MediaStreams cannot cross this bridge.
   getDesktopCaptureSources,
+  setDesktopCaptureSource: (sourceId) => ipcRenderer.sendSync('screen:set-source', String(sourceId || '')),
+  setDesktopCaptureActive: (active) => ipcRenderer.sendSync('screen:set-active', Boolean(active)),
   /** Native file picker for character import; returns an absolute path or null. */
   pickCharacterSource: () => ipcRenderer.invoke('dialog:pick-character'),
+  /** Per-user Windows login startup; supported only by packaged Windows builds. */
+  getAutoStartStatus: () => ipcRenderer.invoke('startup:get-status'),
+  setAutoStart: (enabled) => ipcRenderer.invoke('startup:set-enabled', Boolean(enabled)),
+  /** Read-only status from the Electron-owned DesktopHost pipe. */
+  getDesktopHostStatus: () => ipcRenderer.invoke('desktop-host:get-status'),
+  /** Open the separately hosted Live Core surface through the trusted main process. */
+  openLiveCore: () => ipcRenderer.invoke('live-core:open'),
+  getLiveCoreSurfaceStatus: () => ipcRenderer.invoke('live-core:surface-status'),
+  setLiveCoreSurface: (enabled) => ipcRenderer.invoke('live-core:surface-set', Boolean(enabled)),
+  onLiveCoreSurfaceStatus: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('live-core:surface-status', listener);
+    return () => ipcRenderer.removeListener('live-core:surface-status', listener);
+  },
+  onDesktopHostMode: (callback) => {
+    const listener = (_event, enabled) => callback(Boolean(enabled));
+    ipcRenderer.on('app:desktop-host-mode', listener);
+    return () => ipcRenderer.removeListener('app:desktop-host-mode', listener);
+  },
   /** Main window: open the Character Studio when asked from the tray/companion. */
   onOpenStudio: (callback) => {
     const listener = () => callback();
@@ -71,4 +92,8 @@ contextBridge.exposeInMainWorld('myraa', {
       return () => ipcRenderer.removeListener(channel, listener);
     },
   },
-});
+};
+
+// Keep the old bridge name as a compatibility alias for legacy renderer code.
+contextBridge.exposeInMainWorld('sara', saraBridge);
+contextBridge.exposeInMainWorld('myraa', saraBridge);

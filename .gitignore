@@ -17,9 +17,25 @@ __pycache__/
 .pnpm-store/
 agent_build/
 agent_dist/
+sara-windows/native/**/bin/
+sara-windows/native/**/obj/
+sara-windows/native/**/publish/
+assets/core ui/desktop-host/dotnet/**/bin/
+assets/core ui/desktop-host/dotnet/**/obj/
+assets/core ui/desktop-host/dotnet/**/publish/
 release/
 release-public/
 assets/.aistudio/
 assets/*.mp4
 .env*
 !.env.example
+
+# Local/private user data and generated media
+Desktop/
+Documents/
+Downloads/
+memories.json
+settings.json
+yt_studio/temp/
+yt_studio/output/
+yt_studio/*.mp3

@@ -19,7 +19,7 @@ import traceback
 from contextlib import asynccontextmanager
 from typing import Any, Dict
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -105,7 +105,12 @@ def observe() -> Dict[str, Any]:
 
 
 @app.post("/execute", response_model=ExecuteResponse)
-def execute(req: ExecuteRequest) -> ExecuteResponse:
+def execute(req: ExecuteRequest, authorization: str | None = Header(default=None)) -> ExecuteResponse:
+    expected = os.environ.get("MYRAA_AGENT_TOKEN", "").strip()
+    # Fail closed: the agent must never accept direct tool calls when it was
+    # not launched by the authenticated SARA backend with a per-launch token.
+    if not expected or authorization != f"Bearer {expected}":
+        raise HTTPException(status_code=401, detail="Desktop agent authentication required.")
     tool = req.tool
     args = req.args or {}
     log.info("EXEC tool=%s args=%s", tool, _short_args(args))

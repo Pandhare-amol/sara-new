@@ -106,7 +106,7 @@ export class RecoveryEngine {
   private consecutive = 0;
   private readonly recentActions: string[] = [];
 
-  constructor(private readonly maxConsecutiveFailures = 5) {}
+  constructor(private readonly maxConsecutiveFailures = 5, private readonly stuckActionLimit = 3) {}
 
   /** Record the outcome of an action. Returns advice when it failed. */
   record(tool: string, args: Record<string, unknown>, ok: boolean, category: FailureCategory | undefined, screenChanged: boolean): RecoveryAdvice | null {
@@ -136,8 +136,8 @@ export class RecoveryEngine {
     if (this.consecutive >= this.maxConsecutiveFailures) {
       return { category: kind, attempt, guidance, escalate: true, reason: `${this.consecutive} failures in a row.` };
     }
-    if (repeats >= 2 && !screenChanged) {
-      return { category: kind, attempt, guidance: `You repeated the same failing action ${repeats + 1} times on an unchanged screen. ${guidance}`, escalate: repeats >= 3, reason: "Stuck repeating the same action." };
+    if (repeats >= this.stuckActionLimit - 1 && !screenChanged) {
+      return { category: kind, attempt, guidance: `The same action failed ${repeats + 1} times on an unchanged screen. Change method now; do not repeat this action. ${guidance}`, escalate: repeats + 1 >= this.stuckActionLimit, reason: "Stuck repeating the same action." };
     }
     return { category: kind, attempt, guidance, escalate: false };
   }

@@ -46,7 +46,10 @@ function runPowerShell(script: string, input: string): string {
   const result = spawnSync(
     "powershell.exe",
     ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
-    { input, encoding: "utf8", windowsHide: true, timeout: 15_000 },
+    // PowerShell startup can be noticeably slower when the full test suite or
+    // the desktop workers are active. Keep this bounded, but avoid turning a
+    // transient scheduler delay into a false migration failure.
+    { input, encoding: "utf8", windowsHide: true, timeout: 30_000 },
   );
   if (result.status !== 0) {
     throw new Error(`DPAPI operation failed: ${(result.stderr || "").trim().split("\n")[0] || `exit ${result.status}`}`);

@@ -4,11 +4,11 @@ using System.IO;
 using System.Reflection;
 using System.Windows.Forms;
 
-[assembly: AssemblyTitle("MYRAA")]
-[assembly: AssemblyDescription("MYRAA Desktop Companion Launcher")]
-[assembly: AssemblyProduct("MYRAA")]
-[assembly: AssemblyCompany("MYRAA")]
-[assembly: AssemblyCopyright("Copyright © 2026 MYRAA")]
+[assembly: AssemblyTitle("Sara")]
+[assembly: AssemblyDescription("Sara Desktop Companion Launcher")]
+[assembly: AssemblyProduct("Sara")]
+[assembly: AssemblyCompany("Sara")]
+[assembly: AssemblyCopyright("Copyright © 2026 Sara")]
 [assembly: AssemblyVersion("1.0.1.0")]
 [assembly: AssemblyFileVersion("1.0.1.0")]
 
@@ -18,13 +18,13 @@ internal static class Program
     private static int Main(string[] args)
     {
         string baseDirectory = AppDomain.CurrentDomain.BaseDirectory;
-        string runtimePath = Path.Combine(baseDirectory, "MYRAA-runtime.exe");
+        string runtimePath = Path.Combine(baseDirectory, "Sara-runtime.exe");
 
         if (!File.Exists(runtimePath))
         {
             MessageBox.Show(
-                "MYRAA-runtime.exe is missing. Reinstall MYRAA and try again.",
-                "MYRAA failed to start",
+                "Sara-runtime.exe is missing. Reinstall Sara and try again.",
+                "Sara failed to start",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
             return 1;
@@ -33,7 +33,7 @@ internal static class Program
         try
         {
             // Electron rejects several globally configured Node flags before the
-            // JavaScript main process starts. Keep those flags out of MYRAA while
+            // JavaScript main process starts. Keep those flags out of Sara while
             // leaving the user's system-wide configuration untouched.
             Environment.SetEnvironmentVariable("NODE_OPTIONS", null, EnvironmentVariableTarget.Process);
             Environment.SetEnvironmentVariable("ELECTRON_RUN_AS_NODE", null, EnvironmentVariableTarget.Process);
@@ -49,7 +49,7 @@ internal static class Program
             if (runtime == null) return 1;
 
             // The electron-builder portable wrapper owns a temporary extracted
-            // directory and removes it as soon as MYRAA.exe exits. Keep this
+            // directory and removes it as soon as Sara.exe exits. Keep this
             // lightweight launcher alive until Electron closes so the portable
             // runtime and its bundled desktop agent remain available.
             runtime.WaitForExit();
@@ -58,8 +58,8 @@ internal static class Program
         catch (Exception error)
         {
             MessageBox.Show(
-                "MYRAA could not be launched.\r\n\r\n" + error.Message,
-                "MYRAA failed to start",
+                "Sara could not be launched.\r\n\r\n" + error.Message,
+                "Sara failed to start",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
             return 1;

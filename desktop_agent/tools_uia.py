@@ -526,6 +526,11 @@ def inspect_ui(args: Dict[str, Any]) -> Dict[str, Any]:
     if window["minimized"]:
         note = " The window is minimized, so few controls are visible; restore it first."
     snapshot["result"] = f"Inspected {len(snapshot['elements'])} controls in '{window['title']}'.{note}"
+    snapshot["accessibility"] = {
+        "available": bool(snapshot["elements"]),
+        "supported": bool(snapshot["elements"]),
+        "reason": None if snapshot["elements"] else "The application exposed no usable UI Automation controls; use visual or keyboard fallback only if permitted.",
+    }
     return snapshot
 
 

@@ -26,6 +26,7 @@ const { BrowserWindow, screen, Menu, ipcMain } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const win32 = require('./win32.cjs');
+const { shouldIgnoreMouseEvents, canBeginDrag } = require('./companionLayerPolicy.cjs');
 
 const BASE_WIDTH = 300;
 const BASE_HEIGHT = 560;
@@ -141,7 +142,7 @@ class CompanionManager {
     const enabled = Boolean(settings?.companion?.enabled);
     if (enabled && !this.win) this.create();
     else if (!enabled && this.win) this.destroy();
-    else if (this.win) this.resize();
+    else if (this.win) { this.applyLayerMode(); this.resize(); }
   }
 
   get level() {
@@ -273,7 +274,7 @@ class CompanionManager {
       skipTaskbar: true,
       hasShadow: false,
       focusable: false,
-      alwaysOnTop: true,
+      alwaysOnTop: !Boolean(this.settings?.companion?.desktopLayer),
       fullscreenable: false,
       backgroundColor: '#00000000',
       title: 'Sara companion',
@@ -284,9 +285,7 @@ class CompanionManager {
         backgroundThrottling: false,
       },
     });
-    // Above the taskbar so she can sit on it.
-    this.win.setAlwaysOnTop(true, 'screen-saver');
-    this.win.setIgnoreMouseEvents(true, { forward: true });
+    this.applyLayerMode();
     this.interactive = false;
     this.mode = 'standing';
     this.contactY = null;
@@ -314,6 +313,16 @@ class CompanionManager {
       this.keepOnScreen();
       this.startFall(0, 0);
     });
+  }
+
+  /** Desktop-layer mode is passive: below normal app windows and never captures input. */
+  applyLayerMode() {
+    if (!this.win || this.win.isDestroyed()) return;
+    const background = Boolean(this.settings?.companion?.desktopLayer);
+    this.win.setAlwaysOnTop(!background, background ? undefined : 'screen-saver');
+    if (background) this.interactive = false;
+    this.win.setIgnoreMouseEvents(shouldIgnoreMouseEvents(this.settings, this.interactive), { forward: true });
+    if (background) this.win.setSkipTaskbar(true);
   }
 
   destroy() {
@@ -401,9 +410,14 @@ class CompanionManager {
   }
 
   setInteractive(value) {
+    if (Boolean(this.settings?.companion?.desktopLayer)) {
+      this.interactive = false;
+      if (this.win && !this.win.isDestroyed()) this.win.setIgnoreMouseEvents(true, { forward: true });
+      return;
+    }
     if (!this.win || this.interactive === value || this.drag) return;
     this.interactive = value;
-    this.win.setIgnoreMouseEvents(!value, { forward: true });
+    this.win.setIgnoreMouseEvents(shouldIgnoreMouseEvents(this.settings, value), { forward: true });
   }
 
   send(channel, payload) {
@@ -595,7 +609,7 @@ class CompanionManager {
   }
 
   beginDrag() {
-    if (!this.win) return;
+    if (!this.win || !canBeginDrag(this.settings)) return;
     this.interrupt();
     this.hanging = false;
     if (this.lying) {
@@ -1318,7 +1332,7 @@ class CompanionManager {
       ['giggle', 0.8],
       ['sit', 3.5],
       ['walk', companion.walkAround !== false && lively ? 4 : 0],
-      ['icon', companion.iconPlay && lively && this.anchor.kind === 'ground' ? (level === 'playful' ? 2.5 : 1.2) : 0],
+      ['icon', !companion.desktopLayer && companion.iconPlay && lively && this.anchor.kind === 'ground' ? (level === 'playful' ? 2.5 : 1.2) : 0],
       ['hide', companion.hideAndPeek !== false && lively && this.anchor.kind === 'ground' ? (level === 'playful' ? 3 : 1.6) : 0],
     ]);
     this.nextThought = now + rand(7000, 16000) * pace;

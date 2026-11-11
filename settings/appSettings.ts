@@ -28,7 +28,18 @@ export interface AppSettings {
     maxSteps: number;
     conflictWaitSec: number;
     emergencyShortcut: string;
+    assistantShortcut: string;
     showTaskHud: boolean;
+    keepRunningInBackground: boolean;
+  };
+  /** Opt-in presentation and interaction preferences; safety remains enforced elsewhere. */
+  humanLike: {
+    observeVerifyActions: boolean;
+    smoothMouseMovement: boolean;
+    naturalTypingPauses: boolean;
+    pauseOnUserInput: boolean;
+    stuckActionLimit: number;
+    conciseProgressUpdates: boolean;
   };
   voice: {
     voiceName: string;
@@ -56,6 +67,12 @@ export interface AppSettings {
     standOut: number;
     /** She sometimes hides behind a screen edge and peeks back in. */
     hideAndPeek: boolean;
+    /** Keep the companion as a passive desktop background layer below normal windows. */
+    desktopLayer: boolean;
+  };
+  desktopHost: {
+    enabled: boolean;
+    monitorDevice: string;
   };
   character: {
     activeCharacterId: string;
@@ -88,8 +105,16 @@ export interface AppSettings {
   };
   privacy: {
     screenAwareness: boolean;
+    screenAutoResume: boolean;
     cameraPresence: boolean;
     clipboardInContext: boolean;
+  };
+  security: {
+    faceEnabled: boolean;
+    voiceEnabled: boolean;
+    idleTimeoutMin: number;
+    absoluteTimeoutHours: number;
+    lockOnWindowsLock: boolean;
   };
   performance: {
     activeFps: number;
@@ -101,6 +126,16 @@ export interface AppSettings {
     debugView: boolean;
     physicsDebug: boolean;
     verboseLogs: boolean;
+  };
+  /** Additive advanced modules. All are opt-in; existing core behavior is unchanged. */
+  advancedFeatures: {
+    adaptiveTone: boolean;
+    skillAcquisition: boolean;
+    predictiveSuggestions: boolean;
+    deviceSync: boolean;
+    secureVaultRecords: boolean;
+    selfEvolutionProposals: boolean;
+    immersiveAdapters: boolean;
   };
 }
 
@@ -121,7 +156,17 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     maxSteps: 30,
     conflictWaitSec: 6,
     emergencyShortcut: "Control+Alt+Shift+S",
+    assistantShortcut: "Control+Alt+Space",
     showTaskHud: true,
+    keepRunningInBackground: false,
+  },
+  humanLike: {
+    observeVerifyActions: true,
+    smoothMouseMovement: true,
+    naturalTypingPauses: false,
+    pauseOnUserInput: true,
+    stuckActionLimit: 3,
+    conciseProgressUpdates: true,
   },
   voice: {
     voiceName: "Aoede",
@@ -144,6 +189,11 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     iconPlay: false,
     standOut: 0.7,
     hideAndPeek: true,
+    desktopLayer: false,
+  },
+  desktopHost: {
+    enabled: false,
+    monitorDevice: "",
   },
   character: {
     activeCharacterId: "",
@@ -171,9 +221,11 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   },
   privacy: {
     screenAwareness: true,
+    screenAutoResume: false,
     cameraPresence: false,
     clipboardInContext: false,
   },
+  security: { faceEnabled: false, voiceEnabled: false, idleTimeoutMin: 10, absoluteTimeoutHours: 8, lockOnWindowsLock: true },
   performance: {
     activeFps: 60,
     idleFps: 30,
@@ -184,6 +236,15 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     debugView: false,
     physicsDebug: false,
     verboseLogs: false,
+  },
+  advancedFeatures: {
+    adaptiveTone: false,
+    skillAcquisition: false,
+    predictiveSuggestions: false,
+    deviceSync: false,
+    secureVaultRecords: false,
+    selfEvolutionProposals: false,
+    immersiveAdapters: false,
   },
 };
 
@@ -198,7 +259,7 @@ const bool = (value: unknown, fallback: boolean) => (typeof value === "boolean" 
 export function normalizeSettings(input: unknown, base: AppSettings = DEFAULT_APP_SETTINGS): AppSettings {
   const raw = (input && typeof input === "object" ? input : {}) as Record<string, any>;
   const d = base;
-  const b = raw.behavior || {}, a = raw.autonomy || {}, v = raw.voice || {}, c = raw.companion || {}, ch = raw.character || {}, p = raw.physics || {}, pr = raw.privacy || {}, pe = raw.performance || {}, dev = raw.developer || {}, gr = raw.graphics || {};
+  const b = raw.behavior || {}, a = raw.autonomy || {}, h = raw.humanLike || {}, v = raw.voice || {}, c = raw.companion || {}, dh = raw.desktopHost || {}, ch = raw.character || {}, p = raw.physics || {}, pr = raw.privacy || {}, sec = raw.security || {}, pe = raw.performance || {}, dev = raw.developer || {}, gr = raw.graphics || {}, af = raw.advancedFeatures || {};
   return {
     version: 3,
     onboardingComplete: bool(raw.onboardingComplete, d.onboardingComplete),
@@ -216,7 +277,17 @@ export function normalizeSettings(input: unknown, base: AppSettings = DEFAULT_AP
       maxSteps: clamp(a.maxSteps, 5, 80, d.autonomy.maxSteps),
       conflictWaitSec: clamp(a.conflictWaitSec, 1, 30, d.autonomy.conflictWaitSec),
       emergencyShortcut: typeof a.emergencyShortcut === "string" && /^[A-Za-z0-9+]{3,40}$/.test(a.emergencyShortcut) ? a.emergencyShortcut : d.autonomy.emergencyShortcut,
+      assistantShortcut: typeof a.assistantShortcut === "string" && /^[A-Za-z0-9+]{3,40}$/.test(a.assistantShortcut) ? a.assistantShortcut : d.autonomy.assistantShortcut,
       showTaskHud: bool(a.showTaskHud, d.autonomy.showTaskHud),
+      keepRunningInBackground: bool(a.keepRunningInBackground, d.autonomy.keepRunningInBackground),
+    },
+    humanLike: {
+      observeVerifyActions: bool(h.observeVerifyActions, d.humanLike.observeVerifyActions),
+      smoothMouseMovement: bool(h.smoothMouseMovement, d.humanLike.smoothMouseMovement),
+      naturalTypingPauses: bool(h.naturalTypingPauses, d.humanLike.naturalTypingPauses),
+      pauseOnUserInput: bool(h.pauseOnUserInput, d.humanLike.pauseOnUserInput),
+      stuckActionLimit: Math.round(clamp(h.stuckActionLimit, 2, 5, d.humanLike.stuckActionLimit)),
+      conciseProgressUpdates: bool(h.conciseProgressUpdates, d.humanLike.conciseProgressUpdates),
     },
     voice: {
       voiceName: typeof v.voiceName === "string" && /^[A-Za-z]{2,24}$/.test(v.voiceName) ? v.voiceName : d.voice.voiceName,
@@ -246,6 +317,11 @@ export function normalizeSettings(input: unknown, base: AppSettings = DEFAULT_AP
       iconPlay: bool(c.iconPlay, d.companion.iconPlay),
       standOut: clamp(c.standOut, 0, 1, d.companion.standOut),
       hideAndPeek: bool(c.hideAndPeek, d.companion.hideAndPeek),
+      desktopLayer: bool(c.desktopLayer, d.companion.desktopLayer),
+    },
+    desktopHost: {
+      enabled: bool(dh.enabled, d.desktopHost.enabled),
+      monitorDevice: typeof dh.monitorDevice === "string" && dh.monitorDevice.length <= 128 ? dh.monitorDevice : d.desktopHost.monitorDevice,
     },
     character: {
       activeCharacterId: typeof ch.activeCharacterId === "string" && /^[a-z0-9_-]{1,64}$/.test(ch.activeCharacterId) ? ch.activeCharacterId : d.character.activeCharacterId,
@@ -273,8 +349,16 @@ export function normalizeSettings(input: unknown, base: AppSettings = DEFAULT_AP
     },
     privacy: {
       screenAwareness: bool(pr.screenAwareness, d.privacy.screenAwareness),
+      screenAutoResume: bool(pr.screenAutoResume, d.privacy.screenAutoResume),
       cameraPresence: bool(pr.cameraPresence, d.privacy.cameraPresence),
       clipboardInContext: bool(pr.clipboardInContext, d.privacy.clipboardInContext),
+    },
+    security: {
+      faceEnabled: bool(sec.faceEnabled, d.security.faceEnabled),
+      voiceEnabled: bool(sec.voiceEnabled, d.security.voiceEnabled),
+      idleTimeoutMin: Math.round(clamp(sec.idleTimeoutMin, 1, 120, d.security.idleTimeoutMin)),
+      absoluteTimeoutHours: Math.round(clamp(sec.absoluteTimeoutHours, 1, 48, d.security.absoluteTimeoutHours)),
+      lockOnWindowsLock: bool(sec.lockOnWindowsLock, d.security.lockOnWindowsLock),
     },
     performance: {
       activeFps: clamp(pe.activeFps, 24, 144, d.performance.activeFps),
@@ -286,6 +370,15 @@ export function normalizeSettings(input: unknown, base: AppSettings = DEFAULT_AP
       debugView: bool(dev.debugView, d.developer.debugView),
       physicsDebug: bool(dev.physicsDebug, d.developer.physicsDebug),
       verboseLogs: bool(dev.verboseLogs, d.developer.verboseLogs),
+    },
+    advancedFeatures: {
+      adaptiveTone: bool(af.adaptiveTone, d.advancedFeatures.adaptiveTone),
+      skillAcquisition: bool(af.skillAcquisition, d.advancedFeatures.skillAcquisition),
+      predictiveSuggestions: bool(af.predictiveSuggestions, d.advancedFeatures.predictiveSuggestions),
+      deviceSync: bool(af.deviceSync, d.advancedFeatures.deviceSync),
+      secureVaultRecords: bool(af.secureVaultRecords, d.advancedFeatures.secureVaultRecords),
+      selfEvolutionProposals: bool(af.selfEvolutionProposals, d.advancedFeatures.selfEvolutionProposals),
+      immersiveAdapters: bool(af.immersiveAdapters, d.advancedFeatures.immersiveAdapters),
     },
   };
 }

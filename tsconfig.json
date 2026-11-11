@@ -22,5 +22,13 @@
     },
     "allowImportingTsExtensions": true,
     "noEmit": true
-  }
+  },
+  "exclude": [
+    "node_modules",
+    "dist",
+    "assets/core ui/src/App.tsx",
+    "assets/core ui/src/ExistingSaraPlaceholder.tsx",
+    "assets/core ui/src/utils/**",
+    "assets/core ui/vite.config.ts"
+  ]
 }

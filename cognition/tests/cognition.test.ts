@@ -137,6 +137,35 @@ test("goal manager respects dependencies, completion, and cancellation", async (
   assert.equal(manager.get(dependentGoal.id)?.status, "cancelled");
 });
 
+test("mission completion requires evidence when success criteria are declared", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "myraa-mission-test-"));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const manager = new GoalManager(path.join(dir, "goals.json"));
+  await manager.initialize();
+  const goal = await manager.create({
+    objective: "Create and verify a report",
+    successCriteria: ["The report exists and can be reopened"],
+    tasks: [{ id: "create", title: "Create report" }],
+  });
+  await manager.updateTask(goal.id, "create", { status: "completed", progress: 1 });
+  assert.equal(manager.get(goal.id)?.status, "active");
+  await assert.rejects(() => manager.verifyCompletion(goal.id, []), /evidence is required/);
+  const verified = await manager.verifyCompletion(goal.id, ["Reopened report successfully"]);
+  assert.equal(verified.status, "completed");
+  assert.equal(verified.completionVerified, true);
+  assert.deepEqual(verified.completionEvidence, ["Reopened report successfully"]);
+});
+
+test("mission subtasks retain the real runtime task binding", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "myraa-mission-binding-"));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const manager = new GoalManager(path.join(dir, "goals.json"));
+  await manager.initialize();
+  const goal = await manager.create({ objective: "Run a mission", tasks: [{ id: "step", title: "Inspect the project" }] });
+  const updated = await manager.updateTask(goal.id, "step", { status: "running", runtimeTaskId: "runtime-task-1" });
+  assert.equal(updated.tasks[0].runtimeTaskId, "runtime-task-1");
+});
+
 test("tool executor allows reads, confirms destructive actions, and can cancel work", async () => {
   const config = loadCognitionConfig({} as NodeJS.ProcessEnv);
   const registry = new ToolRegistry();
@@ -160,6 +189,22 @@ test("tool executor allows reads, confirms destructive actions, and can cancel w
   const confirmed = await executor.confirm(deletion.confirmationId!);
   assert.equal(confirmed.success, true);
   assert.equal(calls, 2);
+});
+
+test("tool executor rejects desktop control while the owner session is locked", async () => {
+  const registry = new ToolRegistry();
+  registry.registerDesktopTools(["systemInfo"]);
+  let calls = 0;
+  const executor = new ToolExecutor({
+    config: loadCognitionConfig({} as NodeJS.ProcessEnv),
+    registry,
+    authorize: () => false,
+    handler: async () => { calls += 1; return { ok: true }; },
+  });
+  const outcome = await executor.execute("systemInfo", {});
+  assert.equal(outcome.success, false);
+  assert.equal(outcome.status, "denied");
+  assert.equal(calls, 0);
 });
 
 test("user cancellation aborts an in-flight tool and never reports success", async () => {

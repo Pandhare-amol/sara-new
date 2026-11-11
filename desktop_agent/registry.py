@@ -61,6 +61,9 @@ DESKTOP_TOOL_NAMES = [
     "openWebsite",
     "searchWeb",
     "searchYouTube",
+    "youtubeControl",
+    "switchBrowserTab",
+    "closeBrowserTab",
     "searchGoogle",
     "searchGitHub",
     # files
@@ -72,6 +75,7 @@ DESKTOP_TOOL_NAMES = [
     "openFolder",
     "listFiles",
     "searchFiles",
+    "findFile",
     # pc control (volume + gated power)
     "volumeUp",
     "volumeDown",
@@ -155,6 +159,7 @@ DESKTOP_TOOL_NAMES = [
     "moveDesktopIcon",
     # File Explorer selection
     "selectFiles",
+    "cleanupAllowlistedProcess",
 ]
 
 
@@ -183,6 +188,7 @@ _MODULE_NAMES = [
     "tools_input_ext",
     "tools_desktop_icons",
     "tools_explorer",
+    "tools_resources",
 ]
 
 

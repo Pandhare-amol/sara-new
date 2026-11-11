@@ -63,6 +63,7 @@ export class GoalManager {
     const tasks: GoalTask[] = rawTasks.map((task) => ({
       id: task.id?.trim() || randomUUID(),
       title: task.title.trim(),
+      runtimeTaskId: null,
       status: task.status || "pending",
       priority: clamp(task.priority ?? 0.5),
       dependsOn: [...(task.dependsOn || [])],
@@ -85,6 +86,9 @@ export class GoalManager {
       projectId: input.projectId ?? null,
       tasks,
       blockers: [],
+      completionVerified: false,
+      completionEvidence: [],
+      verifiedAt: null,
       createdAt: timestamp,
       updatedAt: timestamp,
     };
@@ -96,7 +100,7 @@ export class GoalManager {
   async updateTask(
     goalId: string,
     taskId: string,
-    patch: Partial<Pick<GoalTask, "status" | "progress" | "error" | "attempts">>,
+    patch: Partial<Pick<GoalTask, "status" | "progress" | "error" | "attempts" | "runtimeTaskId">>,
   ): Promise<Goal> {
     this.assertLoaded();
     const goal = this.requireGoal(goalId);
@@ -106,6 +110,7 @@ export class GoalManager {
     if (patch.progress !== undefined) task.progress = clamp(patch.progress);
     if (patch.error !== undefined) task.error = patch.error;
     if (patch.attempts !== undefined) task.attempts = Math.max(0, patch.attempts);
+    if (patch.runtimeTaskId !== undefined) task.runtimeTaskId = patch.runtimeTaskId;
     task.updatedAt = new Date().toISOString();
     goal.updatedAt = task.updatedAt;
     goal.status = deriveGoalStatus(goal);
@@ -125,6 +130,7 @@ export class GoalManager {
     const tasks: GoalTask[] = rawTasks.map((task) => ({
       id: task.id?.trim() || randomUUID(),
       title: task.title.trim(),
+      runtimeTaskId: null,
       status: "pending",
       priority: clamp(task.priority ?? 0.5),
       dependsOn: [...(task.dependsOn || [])],
@@ -139,6 +145,9 @@ export class GoalManager {
     validateTaskGraph(tasks);
     goal.tasks = tasks;
     goal.status = "active";
+    goal.completionVerified = false;
+    goal.completionEvidence = [];
+    goal.verifiedAt = null;
     goal.blockers = goal.blockers.filter((item) => item !== "planning");
     goal.updatedAt = timestamp;
     await this.persist();
@@ -157,6 +166,28 @@ export class GoalManager {
         task.updatedAt = goal.updatedAt;
       }
     }
+    await this.persist();
+    return structuredClone(goal);
+  }
+
+  /**
+   * Record independent evidence that the requested goal was achieved.
+   * Tool completion alone is not sufficient when the goal declared criteria.
+   */
+  async verifyCompletion(goalId: string, evidence: string[]): Promise<Goal> {
+    this.assertLoaded();
+    const goal = this.requireGoal(goalId);
+    if (!goal.tasks.length || !goal.tasks.every((task) => task.status === "completed")) {
+      throw new Error("All mission tasks must be completed before final verification.");
+    }
+    const normalized = [...new Set(evidence.map((item) => String(item).trim()).filter(Boolean))].slice(0, 20);
+    if (!normalized.length) throw new Error("Completion evidence is required.");
+    const now = new Date().toISOString();
+    goal.completionVerified = true;
+    goal.completionEvidence = normalized;
+    goal.verifiedAt = now;
+    goal.status = "completed";
+    goal.updatedAt = now;
     await this.persist();
     return structuredClone(goal);
   }
@@ -204,7 +235,9 @@ export class GoalManager {
 }
 
 function deriveGoalStatus(goal: Goal): Goal["status"] {
-  if (goal.tasks.length > 0 && goal.tasks.every((task) => task.status === "completed")) return "completed";
+  if (goal.tasks.length > 0 && goal.tasks.every((task) => task.status === "completed")) {
+    return goal.successCriteria.length === 0 || goal.completionVerified === true ? "completed" : "active";
+  }
   if (goal.tasks.some((task) => task.status === "running")) return "active";
   if (goal.tasks.some((task) => task.status === "blocked")) return "blocked";
   if (goal.tasks.some((task) => task.status === "failed" && task.attempts > task.maxRetries)) return "failed";

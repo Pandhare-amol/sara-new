@@ -24,7 +24,9 @@ export type AppEventType =
   | "autonomy.stopped"
   | "dnd.changed"
   | "speech.say"
-  | "debug.log";
+  | "debug.log"
+  | "windows.changed"
+  | "windows.status";
 
 export interface AppEvent<T = unknown> {
   type: AppEventType;

@@ -278,6 +278,43 @@ def search_files(args: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+@register("findFile")
+def find_file(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Resolve an existing named file across approved user/workspace roots."""
+    requested = str(args.get("name") or args.get("filename") or "").strip()
+    if not requested:
+        raise ToolError("Parameter 'name' or 'filename' is required.")
+    wanted = Path(requested).name.casefold()
+    roots_arg = args.get("folders") or args.get("roots")
+    if isinstance(roots_arg, str):
+        roots_arg = [roots_arg]
+    roots = []
+    for raw in (roots_arg or ["home", "desktop", "documents", "downloads"]):
+        root = _resolve_folder(str(raw))
+        if root.exists():
+            _ensure_safe(root)
+            roots.append(root.resolve())
+    unique = sorted(set(roots), key=lambda item: len(str(item)))
+    roots = [root for index, root in enumerate(unique) if not any(str(root).casefold().startswith(str(parent).casefold() + os.sep) for parent in unique[:index])]
+    limit = max(1, min(50, int(args.get("limit", 10))))
+    deadline = time.monotonic() + max(0.5, min(10.0, float(args.get("time_budget", 5.0))))
+    matches: List[str] = []
+    skip = {"node_modules", ".git", "__pycache__", ".venv", "venv", "site-packages", "$recycle.bin", "appdata"}
+    for root in roots:
+        for current, dirs, files in os.walk(root):
+            if time.monotonic() > deadline or len(matches) >= limit:
+                break
+            dirs[:] = [d for d in dirs if d.casefold() not in skip and not d.startswith(".")]
+            for filename in files:
+                if filename.casefold() == wanted:
+                    matches.append(str(Path(current) / filename))
+                    if len(matches) >= limit:
+                        break
+        if time.monotonic() > deadline or len(matches) >= limit:
+            break
+    return {"result": f"Found {len(matches)} exact file match(es) for '{requested}'.", "matches": matches, "count": len(matches), "truncated": time.monotonic() > deadline}
+
+
 __all__ = [
     "create_file",
     "read_file",
@@ -287,4 +324,5 @@ __all__ = [
     "open_folder",
     "list_files",
     "search_files",
+    "find_file",
 ]

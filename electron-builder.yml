@@ -1,3 +1,4 @@
+# Keep the original appId so Sara upgrades existing MYRAA installations in place.
 appId: com.myraa.desktop
 productName: Sara
 copyright: Copyright © 2026 Sara
@@ -23,8 +24,17 @@ files:
 # The PyInstaller-frozen desktop agent (embeds its own Python runtime) is copied
 # verbatim into resources/agent, so the target machine needs no Python.
 extraResources:
-  - from: agent_dist/myraa-agent
+  - from: agent_dist/sara-agent
     to: agent
+    filter: ["**/*"]
+  - from: sara-windows/native/WindowsBridge/publish
+    to: sara-windows-bridge
+    filter: ["**/*"]
+  - from: sara-windows/native/DesktopHost/publish
+    to: sara-desktop-host
+    filter: ["**/*"]
+  - from: "assets/core ui/desktop-host/dotnet/SaraLiveCoreHost/publish"
+    to: sara-live-core-host
     filter: ["**/*"]
 
 win:

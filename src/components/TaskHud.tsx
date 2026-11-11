@@ -301,7 +301,7 @@ const TaskCard: React.FC<{ task: TaskView; question?: { question: string; option
       )}
       {terminal && (task.result || task.error) && (
         <p className={`mt-1.5 text-[11px] leading-relaxed ${task.state === "completed" ? "text-emerald-200/90" : "text-rose-200/90"}`}>
-          {task.state === "completed" ? task.result : task.error || task.result}
+          {asText(task.state === "completed" ? task.result : task.error || task.result)}
         </p>
       )}
 

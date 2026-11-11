@@ -11,10 +11,10 @@
  *   reports where her feet / seat are so the window lands exactly on the
  *   surface she uses.
  * - A thin contour and a soft shadow keep her readable on any wallpaper.
- * - Activity and emotion mirror the main MYRAA window (BroadcastChannel).
+ * - Activity and emotion mirror the main Sara window (BroadcastChannel).
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { MyraaCharacter } from '../character/MyraaCharacter';
+import { SaraCharacter } from '../character/SaraCharacter';
 import type { CharacterSystem } from '../character/core/CharacterSystem';
 import type { CharacterActivity } from '../character/behaviour/behaviours';
 import { CompanionActor, type ActorCommand, type ActorMetrics } from './CompanionActor';
@@ -33,7 +33,8 @@ interface CompanionBridge {
   on(channel: string, callback: (payload: any) => void): () => void;
 }
 
-const bridge = (window as unknown as { myraa?: { companion?: CompanionBridge } }).myraa?.companion ?? null;
+const bridgeWindow = window as unknown as { sara?: { companion?: CompanionBridge }; myraa?: { companion?: CompanionBridge } };
+const bridge = (bridgeWindow.sara ?? bridgeWindow.myraa)?.companion ?? null;
 export const COMPANION_CHANNEL = 'myraa-character-state';
 
 /** Wallpaper contrast: a crisp dark contour plus a soft drop shadow. */
@@ -219,7 +220,7 @@ export const CompanionApp: React.FC = () => {
         />
       )}
       <div className="absolute inset-0" style={{ filter: standOutFilter(standOut) }}>
-        <MyraaCharacter
+        <SaraCharacter
           clothInteraction={false}
           unloadWhenHidden={false}
           key={characterId ?? 'default'}

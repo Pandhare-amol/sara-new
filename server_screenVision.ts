@@ -17,6 +17,8 @@
  * is pure helpers.
  */
 
+import { createHash } from "node:crypto";
+
 /* ---------------------------------------------------------------------------
  * Intent detection
  * ------------------------------------------------------------------------- */
@@ -89,13 +91,40 @@ export interface ScreenVisionDeps {
   onStateChange?: (state: "idle" | "capturing" | "ready" | "error", info?: { error?: string; activeWindow?: string | null }) => void;
 }
 
+export interface ScreenVisionMetrics {
+  captured: number;
+  injected: number;
+  duplicateFrames: number;
+  failed: number;
+  droppedWhileBusy: number;
+  lastCaptureAt: number | null;
+  lastInjectionAt: number | null;
+  lastCaptureLatencyMs: number | null;
+}
+
+const DEFAULT_PRIVACY_WINDOW_PATTERNS = [/password/i, /sign[ -]?in/i, /log[ -]?in/i, /payment/i, /checkout/i, /bank/i, /credit.?card/i, /security code/i];
+
+export function isPrivacySensitiveWindow(title: string | null | undefined, extraPatterns: RegExp[] = []): boolean {
+  const value = String(title || "").trim();
+  if (!value) return false;
+  return [...DEFAULT_PRIVACY_WINDOW_PATTERNS, ...extraPatterns].some((pattern) => pattern.test(value));
+}
+
 const RECENT_FRAME_TTL_MS = 90_000; // follow-up questions reuse the capture for ~90s
 const DEFAULT_CAPTURE_MAX_DIM = 1440;
+const DUPLICATE_INJECTION_WINDOW_MS = 1_500;
 
 export class ScreenVisionPipeline {
   private lastFrame: ScreenVisionFrame | null = null;
   private recentFrameTimer: ReturnType<typeof setTimeout> | null = null;
   private captureInFlight: Promise<ScreenVisionFrame | null> | null = null;
+  private lastInjectedFingerprint: string | null = null;
+  private lastInjectedAt = 0;
+  private readonly metrics: ScreenVisionMetrics = {
+    captured: 0, injected: 0, duplicateFrames: 0, failed: 0,
+    droppedWhileBusy: 0, lastCaptureAt: null, lastInjectionAt: null,
+    lastCaptureLatencyMs: null,
+  };
 
   constructor(private readonly deps: ScreenVisionDeps) {}
 
@@ -129,11 +158,15 @@ export class ScreenVisionPipeline {
     return this.lastFrame;
   }
 
+  getMetrics(): ScreenVisionMetrics { return { ...this.metrics }; }
+
   /** Immediately discard cached visual context (used when a live session ends). */
   dispose(): void {
     if (this.recentFrameTimer) clearTimeout(this.recentFrameTimer);
     this.recentFrameTimer = null;
     this.lastFrame = null;
+    this.lastInjectedFingerprint = null;
+    this.lastInjectedAt = 0;
   }
 
   /**
@@ -147,6 +180,7 @@ export class ScreenVisionPipeline {
     maxDim = DEFAULT_CAPTURE_MAX_DIM,
   ): Promise<ScreenVisionFrame | null> {
     if (this.captureInFlight) {
+      this.metrics.droppedWhileBusy += 1;
       this.log("Capture already in progress; reusing the pending frame.");
       return this.captureInFlight;
     }
@@ -164,6 +198,7 @@ export class ScreenVisionPipeline {
     reason: "intent" | "tool" | "manual",
     maxDim: number,
   ): Promise<ScreenVisionFrame | null> {
+    const startedAt = Date.now();
     this.deps.onStateChange?.("capturing");
     this.log(`Screen request detected (reason=${reason}).`);
     this.log("Capturing display.");
@@ -176,7 +211,7 @@ export class ScreenVisionPipeline {
       });
       if (result.ok && result.result) {
         const frame = this.processAgentResult(result.result as Record<string, unknown>, "viewScreen");
-        if (frame) return frame;
+        if (frame) return this.recordCapture(frame, startedAt);
       }
 
       this.log(`viewScreen failed (${result.error || "invalid image payload"}); falling back to takeScreenshot.`);
@@ -191,10 +226,11 @@ export class ScreenVisionPipeline {
       }
       const frame = this.processAgentResult(fallback.result as Record<string, unknown>, "takeScreenshot");
       if (!frame) this.reportError("Capture failed: no image bytes were returned.");
-      return frame;
+      return frame ? this.recordCapture(frame, startedAt) : null;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.reportError(`Capture failed: ${message}`);
+      this.metrics.failed += 1;
       return null;
     }
   }
@@ -215,9 +251,30 @@ export class ScreenVisionPipeline {
 
   /** Push a captured frame through the realtime-video compatibility path. */
   injectFrame(frame: ScreenVisionFrame): boolean {
+    if (isPrivacySensitiveWindow(frame.activeWindow, this.privacyPatterns())) {
+      this.log("Skipped cloud vision upload for a privacy-sensitive window.");
+      return false;
+    }
+    // Continuous capture can produce identical JPEGs when the desktop is
+    // unchanged. Do not spend network/model quota sending the same frame over
+    // and over, while allowing a later frame through for a fresh question.
+    const fingerprint = createHash("sha256").update(frame.imageBase64).digest("hex");
+    const now = Date.now();
+    if (
+      fingerprint === this.lastInjectedFingerprint
+      && now - this.lastInjectedAt < DUPLICATE_INJECTION_WINDOW_MS
+    ) {
+      this.metrics.duplicateFrames += 1;
+      this.log("Skipped duplicate unchanged frame.");
+      return true;
+    }
     this.log("Sending image to vision model.");
     try {
       this.deps.pushFrameToSession({ data: frame.imageBase64, mimeType: frame.mimeType });
+      this.lastInjectedFingerprint = fingerprint;
+      this.lastInjectedAt = now;
+      this.metrics.injected += 1;
+      this.metrics.lastInjectionAt = now;
       this.markFrameDelivered(frame);
       return true;
     } catch (error) {
@@ -225,6 +282,20 @@ export class ScreenVisionPipeline {
       this.reportError(`Vision session rejected the image: ${message}`);
       return false;
     }
+  }
+
+  private recordCapture(frame: ScreenVisionFrame, startedAt: number): ScreenVisionFrame {
+    this.metrics.captured += 1;
+    this.metrics.lastCaptureAt = frame.capturedAt;
+    this.metrics.lastCaptureLatencyMs = Math.max(0, frame.capturedAt - startedAt);
+    return frame;
+  }
+
+  private privacyPatterns(): RegExp[] {
+    const configured = process.env.MYRAA_SCREEN_PRIVACY_PATTERNS || "";
+    return configured.split(",").map((item) => item.trim()).filter(Boolean).map((item) => {
+      try { return new RegExp(item, "i"); } catch { return /$a/; }
+    });
   }
 
   /** Mark delivery after a caller sends image + question in one ordered turn. */

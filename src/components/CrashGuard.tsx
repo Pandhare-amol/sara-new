@@ -6,13 +6,14 @@
  */
 import React from 'react';
 
-const KEY = 'myraa:crash-reloads';
+const KEY = 'sara:crash-reloads';
+const LEGACY_KEY = 'myraa:crash-reloads';
 const Base = (React as unknown as { Component: new (props: unknown) => { props: { children?: unknown }; state: { failed: boolean }; setState(s: { failed: boolean }): void } }).Component;
 
 function recentReloads(): number[] {
   try {
     const now = Date.now();
-    return (JSON.parse(sessionStorage.getItem(KEY) || '[]') as number[]).filter((at) => now - at < 120_000);
+    return (JSON.parse(sessionStorage.getItem(KEY) || sessionStorage.getItem(LEGACY_KEY) || '[]') as number[]).filter((at) => now - at < 120_000);
   } catch {
     return [];
   }
@@ -26,7 +27,7 @@ export class CrashGuard extends Base {
   }
 
   componentDidCatch(error: unknown): void {
-    console.error('[MYRAA] interface crashed:', error instanceof Error ? error.stack || error.message : String(error));
+    console.error('[Sara] interface crashed:', error instanceof Error ? error.stack || error.message : String(error));
     const reloads = recentReloads();
     if (reloads.length >= 3) return;
     try {

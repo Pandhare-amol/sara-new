@@ -9,7 +9,7 @@
 import { createRequire } from "node:module";
 
 // Works both from tsx (ESM, development) and from the esbuild CJS bundle.
-const nodeRequire: NodeRequire = typeof require === "function" ? require : createRequire(import.meta.url);
+const nodeRequire: NodeRequire = typeof require === "function" ? require : createRequire(typeof __filename === "string" ? __filename : process.cwd());
 
 export interface NativeRect {
   left: number;

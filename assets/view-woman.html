@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Indian Saree Character 3D Viewer</title>
+<style>
+  body { margin: 0; overflow: hidden; background: #0f0f1a; font-family: sans-serif; }
+  #hud { position: absolute; top: 15px; left: 15px; color: #fff; background: rgba(0,0,0,0.7); padding: 12px 18px; border-radius: 8px; }
+</style>
+</head>
+<body>
+
+<div id="hud">
+  ✨ <strong>Saree Character Viewer</strong><br>
+  Drag and drop your <strong>animated .GLB file</strong> here!
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+<script>
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0f0f1a);
+
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+camera.position.set(0, 1.2, 3);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0.9, 0);
+
+// Lighting suited for detailed textures (gold/saree metalness)
+const ambient = new THREE.AmbientLight(0xffffff, 0.8);
+scene.add(ambient);
+
+const keyLight = new THREE.DirectionalLight(0xffecd1, 1.5);
+keyLight.position.set(3, 5, 3);
+keyLight.castShadow = true;
+scene.add(keyLight);
+
+const rimLight = new THREE.DirectionalLight(0xff8c00, 0.8);
+rimLight.position.set(-3, 3, -3);
+scene.add(rimLight);
+
+let mixer;
+const clock = new THREE.Clock();
+
+function loadGLTF(url) {
+  new THREE.GLTFLoader().load(url, (gltf) => {
+    const model = gltf.scene;
+    scene.add(model);
+
+    // Play Mixamo Animation automatically
+    if (gltf.animations.length > 0) {
+      mixer = new THREE.AnimationMixer(model);
+      const action = mixer.clipAction(gltf.animations[0]);
+      action.play();
+    }
+  });
+}
+
+// Drag & Drop Listener
+window.addEventListener('dragover', e => e.preventDefault());
+window.addEventListener('drop', e => {
+  e.preventDefault();
+  const file = e.dataTransfer.files[0];
+  if (file && file.name.endsWith('.glb')) {
+    const url = URL.createObjectURL(file);
+    loadGLTF(url);
+  }
+});
+
+function animate() {
+  requestAnimationFrame(animate);
+  const delta = clock.getDelta();
+  if (mixer) mixer.update(delta);
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+</script>
+</body>
+</html>

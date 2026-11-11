@@ -19,6 +19,8 @@ export interface ToolExecutorOptions {
   handler: ToolHandler;
   confirmations?: ConfirmationStore;
   emit?: (event: CognitiveEventInput) => void | Promise<void>;
+  /** Optional backend-owned gate for tools that control the desktop. */
+  authorize?: (tool: string) => boolean;
 }
 
 export class ToolExecutor {
@@ -41,6 +43,11 @@ export class ToolExecutor {
     const descriptor = this.options.registry.get(tool);
     if (!descriptor) {
       return result(false, "denied", tool, null, `Unknown or unregistered tool: ${tool}`, 2, started, 0);
+    }
+
+    if (this.options.authorize && !this.options.authorize(tool)) {
+      await this.emit("tool.denied", tool, 3, context, { reason: "Owner authentication is required." });
+      return result(false, "denied", tool, null, "Owner authentication is required before desktop control is available.", 3, started, 0);
     }
 
     const riskLevel = this.options.registry.assessRisk(tool, args, context.projectRoot);

@@ -10,6 +10,7 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { DebouncedJsonWriter, readJsonFile } from "../shared/jsonFile";
+import type { TaskComplexityResult } from "./taskComplexity";
 
 export type TaskState =
   | "queued"
@@ -94,6 +95,7 @@ export interface TaskPermissionRecord {
 export interface TaskSession {
   id: string;
   goal: string;
+  complexity?: TaskComplexityResult;
   interpretedGoal: string | null;
   origin: "voice" | "text" | "api" | "internal" | "recovery";
   state: TaskState;
@@ -173,6 +175,7 @@ export class TaskStore {
     const session: TaskSession = {
       id: randomUUID(),
       goal: input.goal.trim().slice(0, 2_000),
+      complexity: undefined,
       interpretedGoal: null,
       origin: input.origin,
       state: "queued",
@@ -253,6 +256,10 @@ export class TaskStore {
     if (status) this.pushStatus(session, status);
     this.emit(session, TERMINAL_STATES.has(to) ? "finished" : "updated");
     this.persist();
+    // Terminal state is the durable mission checkpoint. Do not leave the
+    // final outcome in the debounce window: a process exit immediately after
+    // completion must still preserve the verified result and last actions.
+    if (TERMINAL_STATES.has(to)) void this.writer.flush();
     return session;
   }
 
@@ -327,6 +334,7 @@ export function publicTaskView(session: TaskSession) {
   return {
     id: session.id,
     goal: session.goal,
+    complexity: session.complexity,
     state: session.state,
     origin: session.origin,
     modelId: session.modelId,

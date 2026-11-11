@@ -12,7 +12,7 @@ class PerceptionTests(unittest.TestCase):
         snapshot = collect_snapshot()
         self.assertEqual(
             set(snapshot),
-            {"timestamp", "activeWindow", "applications", "disk", "downloads", "userIdleSeconds"},
+            {"timestamp", "activeWindow", "applications", "disk", "drives", "downloads", "userIdleSeconds", "resources", "cursor"},
         )
         self.assertNotIn("screenshot", snapshot)
         self.assertNotIn("clipboard", snapshot)

@@ -9,10 +9,10 @@ module.exports = async function afterPack(context) {
   const productName = context.packager.appInfo.productFilename;
   const primaryExe = path.join(context.appOutDir, productName + '.exe');
   const runtimeExe = path.join(context.appOutDir, productName + '-runtime.exe');
-  const launcherExe = path.join(__dirname, '..', 'build', 'MYRAA-launcher.exe');
+  const launcherExe = path.join(__dirname, '..', 'build', 'Sara-launcher.exe');
 
   if (!fs.existsSync(primaryExe)) throw new Error('Packaged Electron runtime is missing: ' + primaryExe);
-  if (!fs.existsSync(launcherExe)) throw new Error('MYRAA launcher is missing: ' + launcherExe);
+  if (!fs.existsSync(launcherExe)) throw new Error('Sara launcher is missing: ' + launcherExe);
 
   await fs.promises.copyFile(primaryExe, runtimeExe);
   await fs.promises.copyFile(launcherExe, primaryExe);

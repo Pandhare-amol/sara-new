@@ -11,7 +11,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../../index.css';
-import { MyraaCharacter } from '../MyraaCharacter';
+import { SaraCharacter } from '../SaraCharacter';
 import type { CharacterActivity } from '../behaviour/behaviours';
 import { listCharacters, listAllCharacters, DEFAULT_CHARACTER_ID } from '../config/registry';
 
@@ -129,7 +129,7 @@ const Preview: React.FC = () => {
       <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-purple-800/18 rounded-full blur-[120px]" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[600px] h-[600px] bg-cyan-800/18 rounded-full blur-[150px]" />
 
-      <MyraaCharacter
+      <SaraCharacter
         characterId={characterId}
         activity={activity}
         emotion={emotion}

@@ -13,7 +13,7 @@ import { configFromProfile } from './fromProfile';
  * Public installers (npm run dist:public) ship without the bundled model:
  * its licence forbids redistribution. Each user imports their own character.
  */
-export const PUBLIC_BUILD = import.meta.env.VITE_MYRAA_PUBLIC === '1';
+export const PUBLIC_BUILD = import.meta.env.VITE_SARA_PUBLIC === '1' || import.meta.env.VITE_MYRAA_PUBLIC === '1';
 
 // Character model files are not included in this source tree. All builds start
 // without a bundled character and use locally imported profiles instead.

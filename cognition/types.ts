@@ -315,6 +315,8 @@ export interface MemoryQuery {
 export interface GoalTask {
   id: string;
   title: string;
+  /** ID of the real agent/taskSession executing this mission subtask. */
+  runtimeTaskId?: string | null;
   status: "pending" | "running" | "completed" | "failed" | "cancelled" | "blocked";
   priority: number;
   dependsOn: string[];
@@ -337,6 +339,10 @@ export interface Goal {
   projectId: string | null;
   tasks: GoalTask[];
   blockers: string[];
+  /** A goal with explicit success criteria is not complete until verified. */
+  completionVerified?: boolean;
+  completionEvidence?: string[];
+  verifiedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }

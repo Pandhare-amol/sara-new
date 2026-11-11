@@ -17,6 +17,8 @@ export * from "./runtime";
 export * from "./safety";
 export * from "./situationModel";
 export * from "./skillManager";
+export * from "./deviceRegistry";
+export * from "./mediaLearning";
 export * from "./structuredMemory";
 export * from "./toolExecutor";
 export * from "./toolRegistry";

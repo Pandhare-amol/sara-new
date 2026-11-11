@@ -9,8 +9,9 @@
  *      (http://localhost:3000) into the main application window.
  *   4. Clean up the backend (and its child Python agent) on quit.
  *
- * Tray, window-state persistence, close-to-tray and notifications arrive in
- * Phase 2; installer/auto-update/PyInstaller in later phases. The backend and
+ * Tray, opt-in close-to-tray background mode, and notifications are handled
+ * here so the backend and AI logic can continue independently of the window.
+ * Installer/auto-update/PyInstaller remain separate concerns. The backend and
  * AI logic are reused verbatim — nothing here reimplements chat/memory/voice.
  * ========================================================================= */
 
@@ -20,12 +21,20 @@ const { app, BrowserWindow, Menu, shell, dialog, ipcMain, desktopCapturer, sessi
 const { CompanionManager } = require('./companion.cjs');
 const win32 = require('./win32.cjs');
 const path = require('path');
-// Keep existing user settings, API keys, memories, and logs in their original
-// directory after changing the visible product name to Sara.
-app.setPath('userData', path.join(app.getPath('appData'), 'MYRAA'));
+const fs = require('fs');
+// Move legacy MYRAA data forward once, preserving settings, memories, and keys.
+const saraUserDataPath = path.join(app.getPath('appData'), 'Sara');
+const legacyUserDataPath = path.join(app.getPath('appData'), 'MYRAA');
+try {
+  if (!fs.existsSync(saraUserDataPath) && fs.existsSync(legacyUserDataPath)) {
+    fs.cpSync(legacyUserDataPath, saraUserDataPath, { recursive: true, errorOnExist: false });
+  }
+} catch (error) {
+  console.warn('[Sara] Could not migrate legacy user data directory:', error);
+}
+app.setPath('userData', saraUserDataPath);
 const http = require('http');
 const { spawn } = require('child_process');
-const fs = require('fs');
 const net = require('net');
 
 // --- Constants -------------------------------------------------------------
@@ -33,7 +42,7 @@ const net = require('net');
 // Remotion Studio etc. use, and with one of those running MYRAA's window
 // opened *their* page. Development keeps 3000. If the port is taken anyway,
 // the next free one is used (see choosePort).
-const PREFERRED_PORT = Number(process.env.MYRAA_PORT) || (app.isPackaged ? 47130 : 3000);
+const PREFERRED_PORT = Number(process.env.SARA_PORT || process.env.MYRAA_PORT) || (app.isPackaged ? 47130 : 3000);
 let SERVER_PORT = PREFERRED_PORT;
 // 127.0.0.1, not "localhost": the server listens on IPv4 loopback only, and
 // "localhost" can resolve to ::1, where another app on the same port answers.
@@ -55,7 +64,7 @@ async function choosePort() {
   return PREFERRED_PORT;
 }
 
-/** GET /api/config and check the answer really comes from MYRAA's backend. */
+/** GET /api/health and check the answer really comes from Sara's backend. */
 function askMyraa(timeoutMs, onResult) {
   let done = false;
   const finish = (ok) => {
@@ -63,11 +72,15 @@ function askMyraa(timeoutMs, onResult) {
     done = true;
     onResult(ok);
   };
-  const req = http.get(`${SERVER_ORIGIN}/api/config`, (res) => {
+  const req = http.get(`${SERVER_ORIGIN}/api/health`, (res) => {
     let body = '';
     res.setEncoding('utf8');
     res.on('data', (chunk) => { if (body.length < 4096) body += chunk; });
-    res.on('end', () => finish(res.statusCode === 200 && body.includes('"hasApiKey"')));
+    res.on('end', () => finish(
+      res.statusCode === 200
+      && res.headers['x-sara-runtime'] === 'sara-desktop-v1'
+      && body.includes('"service":"sara"'),
+    ));
     res.on('error', () => finish(false));
   });
   req.on('error', () => finish(false));
@@ -86,11 +99,25 @@ const APP_ICON = path.join(APP_ROOT, 'build', 'icon.png');
 
 /** @type {import('child_process').ChildProcess | null} */
 let serverProcess = null;
+/** @type {import('child_process').ChildProcess | null} */
+let desktopHostProcess = null;
+/** @type {import('child_process').ChildProcess | null} */
+let liveCoreSurfaceProcess = null;
+let desktopHostRestartTimer = null;
+let desktopHostStopTimer = null;
+let desktopHostRestartCount = 0;
+let desktopHostEnabled = false;
+let desktopHostStartedAt = 0;
+let stoppingDesktopHost = false;
+let restartDesktopHostOnExit = false;
 /** @type {BrowserWindow | null} */
 let mainWindow = null;
 /** @type {BrowserWindow | null} */
+let liveCoreWindow = null;
+/** @type {BrowserWindow | null} */
 let splashWindow = null;
 let isQuitting = false;
+const launchedInBackground = process.argv.includes('--sara-background');
 
 // ---------------------------------------------------------------------------
 // Single-instance guard — second launches focus the existing window instead of
@@ -129,14 +156,26 @@ function startBackend() {
   // Frozen Python desktop agent (bundled as an extraResource when packaged).
   // In development this file won't exist, so the backend falls back to running
   // the agent from source with a local Python interpreter.
-  const agentExe = app.isPackaged
-    ? path.join(process.resourcesPath, 'agent', 'myraa-agent.exe')
-    : path.join(APP_ROOT, 'agent_dist', 'myraa-agent', 'myraa-agent.exe');
+  const agentCandidates = app.isPackaged
+    ? [path.join(process.resourcesPath, 'agent', 'sara-agent.exe'), path.join(process.resourcesPath, 'agent', 'myraa-agent.exe')]
+    : [path.join(APP_ROOT, 'agent_dist', 'sara-agent', 'sara-agent.exe'), path.join(APP_ROOT, 'agent_dist', 'myraa-agent', 'myraa-agent.exe')];
+  const agentExe = agentCandidates.find((candidate) => fs.existsSync(candidate));
 
   const env = {
     ...process.env,
     NODE_ENV: 'production',
     ELECTRON_RUN_AS_NODE: '1',
+    SARA_LAUNCHED_BY: 'electron',
+    SARA_DATA_DIR: dataDir,
+    SARA_APP_ROOT: APP_ROOT,
+    SARA_PORT: String(SERVER_PORT),
+    SARA_EXECUTABLE: app.isPackaged ? process.execPath : '',
+    SARA_AGENT_EXE: agentExe || '',
+    SARA_WINDOWS_BRIDGE_DIR: app.isPackaged
+      ? path.join(process.resourcesPath, 'sara-windows-bridge')
+      : path.join(APP_ROOT, 'sara-windows', 'native', 'WindowsBridge', 'publish'),
+    SARA_ELECTRON_INSTANCE_ID: `${process.pid}-${Date.now()}`,
+    // Legacy aliases remain for existing integrations and older agent builds.
     MYRAA_LAUNCHED_BY: 'electron',
     MYRAA_DATA_DIR: dataDir,
     MYRAA_APP_ROOT: APP_ROOT,
@@ -147,7 +186,7 @@ function startBackend() {
     // auto-start entry. It must never point at source scripts or Python.
     env.MYRAA_EXECUTABLE = process.execPath;
   }
-  if (fs.existsSync(agentExe)) {
+  if (agentExe) {
     env.MYRAA_AGENT_EXE = agentExe;
   }
 
@@ -212,6 +251,194 @@ function startBackend() {
       return;
     }
     setTimeout(() => void restartBackend(), 800 * backendCrashes.length);
+  });
+}
+
+const desktopHostPipePath = '\\\\.\\pipe\\Sara.DesktopHost.v1';
+
+function sendDesktopHostCommand(command, timeoutMs = 1000, attempt = 0) {
+  return new Promise((resolve) => {
+    const socket = net.connect(desktopHostPipePath);
+    let response = '';
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      if (!value && attempt < 4) setTimeout(() => sendDesktopHostCommand(command, timeoutMs, attempt + 1).then(resolve), 50 * (attempt + 1));
+      else resolve(value);
+    };
+    socket.setTimeout(timeoutMs, () => finish(null));
+    socket.on('connect', () => socket.write(`${JSON.stringify({ command })}\n`));
+    socket.on('data', (chunk) => {
+      response += chunk.toString('utf8');
+      const newline = response.indexOf('\n');
+      if (newline >= 0) {
+        try { finish(JSON.parse(response.slice(0, newline))); } catch { finish(null); }
+      }
+    });
+    socket.on('error', () => finish(null));
+    socket.on('end', () => {
+      if (!settled && response.trim()) {
+        try { finish(JSON.parse(response.trim())); } catch { finish(null); }
+      } else finish(null);
+    });
+  });
+}
+
+function desktopHostExecutable() {
+  const candidates = app.isPackaged
+    ? [path.join(process.resourcesPath, 'sara-desktop-host', 'Sara.DesktopHost.exe')]
+    : [path.join(APP_ROOT, 'sara-windows', 'native', 'DesktopHost', 'publish', 'Sara.DesktopHost.exe')];
+  return candidates.find((candidate) => fs.existsSync(candidate));
+}
+
+function liveCoreSurfaceExecutable() {
+  const candidates = app.isPackaged
+    ? [path.join(process.resourcesPath, 'sara-live-core-host', 'SaraLiveCoreHost.exe')]
+    : [path.join(APP_ROOT, 'assets', 'core ui', 'desktop-host', 'dotnet', 'SaraLiveCoreHost', 'publish', 'SaraLiveCoreHost.exe')];
+  return candidates.find((candidate) => fs.existsSync(candidate));
+}
+
+function stopLiveCoreSurface() {
+  const child = liveCoreSurfaceProcess;
+  liveCoreSurfaceProcess = null;
+  if (child && !child.killed) child.kill();
+  updateTrayMenu();
+}
+
+function toggleLiveCoreSurface() {
+  if (liveCoreSurfaceProcess && liveCoreSurfaceProcess.exitCode === null) {
+    stopLiveCoreSurface();
+    return;
+  }
+  if (process.platform !== 'win32') {
+    dialog.showMessageBox({ type: 'info', title: 'SARA Live Core', message: 'The desktop surface is available only on Windows.' });
+    return;
+  }
+  const executable = liveCoreSurfaceExecutable();
+  if (!executable) {
+    dialog.showMessageBox({
+      type: 'warning',
+      title: 'SARA Live Core surface unavailable',
+      message: 'The native Live Core host is not built. Build the Windows app with the Live Core host target, then try again.',
+    });
+    return;
+  }
+
+  // This is an opt-in, normal desktop overlay. It is not attached behind
+  // Explorer icons; closing it restores the unchanged Windows desktop.
+  const child = spawn(executable, [`${SERVER_ORIGIN}/?mode=live-core`], {
+    windowsHide: true,
+    stdio: 'ignore',
+  });
+  liveCoreSurfaceProcess = child;
+  child.once('error', (error) => {
+    console.warn(`[Live Core surface] launch failed: ${error.message}`);
+    if (liveCoreSurfaceProcess === child) liveCoreSurfaceProcess = null;
+    updateTrayMenu();
+  });
+  child.once('exit', (code, signal) => {
+    if (liveCoreSurfaceProcess === child) liveCoreSurfaceProcess = null;
+    console.log(`[Live Core surface] exited (${code ?? signal ?? 'unknown'}).`);
+    updateTrayMenu();
+  });
+  updateTrayMenu();
+}
+
+function scheduleDesktopHostRestart() {
+  if (!desktopHostEnabled || isQuitting || desktopHostRestartTimer) return;
+  if (desktopHostRestartCount >= 3) {
+    console.warn('[DesktopHost] restart budget exhausted; restoring the normal SARA window.');
+    openMainWindow();
+    return;
+  }
+  const delays = [1000, 3000, 10000];
+  const delay = delays[desktopHostRestartCount];
+  desktopHostRestartCount += 1;
+  console.warn(`[DesktopHost] restarting optional host in ${delay}ms (${desktopHostRestartCount}/3)`);
+  desktopHostRestartTimer = setTimeout(() => {
+    desktopHostRestartTimer = null;
+    startDesktopHost();
+  }, delay);
+}
+
+function startDesktopHost() {
+  if (!desktopHostEnabled || desktopHostProcess || isQuitting || process.platform !== 'win32') return;
+  const executable = desktopHostExecutable();
+  if (!executable) {
+    console.warn('[DesktopHost] enabled, but the native host executable is not built or packaged.');
+    openMainWindow();
+    return;
+  }
+  const monitor = String(shellSettings?.desktopHost?.monitorDevice || '').slice(0, 128);
+  const args = [`--origin=${SERVER_ORIGIN}`];
+  if (monitor) args.push(`--monitor=${monitor}`);
+  stoppingDesktopHost = false;
+  const child = spawn(executable, args, { windowsHide: true, stdio: 'ignore' });
+  desktopHostProcess = child;
+  desktopHostStartedAt = Date.now();
+  child.once('error', (error) => console.warn(`[DesktopHost] launch failed: ${error.message}`));
+  child.once('exit', (code, signal) => {
+    if (desktopHostProcess === child) desktopHostProcess = null;
+    clearTimeout(desktopHostStopTimer);
+    desktopHostStopTimer = null;
+    const expected = stoppingDesktopHost || code === 0 || isQuitting;
+    const restartForSettings = restartDesktopHostOnExit;
+    stoppingDesktopHost = false;
+    restartDesktopHostOnExit = false;
+    if (Date.now() - desktopHostStartedAt > 60_000) desktopHostRestartCount = 0;
+    console.warn(`[DesktopHost] exited (${code ?? signal ?? 'unknown'}).`);
+    if (restartForSettings && desktopHostEnabled && !isQuitting) startDesktopHost();
+    else if (!expected) scheduleDesktopHostRestart();
+  });
+  void (async () => {
+    for (let attempt = 0; attempt < 30 && desktopHostProcess === child; attempt += 1) {
+      const status = await sendDesktopHostCommand('status', 700);
+      if (status?.ok) {
+        if (attempt > 0) console.log(`[DesktopHost] ready; WebView2=${Boolean(status.webViewReady)}, backend=${Boolean(status.backendOnline)}`);
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    if (desktopHostProcess === child) {
+      console.warn('[DesktopHost] readiness pipe did not respond; terminating host for bounded recovery.');
+      stoppingDesktopHost = false;
+      child.kill();
+    }
+  })();
+}
+
+function setDesktopHostEnabled(enabled) {
+  desktopHostEnabled = Boolean(enabled) && process.platform === 'win32';
+  if (desktopHostRestartTimer) clearTimeout(desktopHostRestartTimer);
+  desktopHostRestartTimer = null;
+  if (desktopHostEnabled) {
+    startDesktopHost();
+    return;
+  }
+  desktopHostRestartCount = 0;
+  const child = desktopHostProcess;
+  if (!child) return;
+  stoppingDesktopHost = true;
+  void sendDesktopHostCommand('shutdown', 1000).then((response) => {
+    if (response?.ok || desktopHostProcess !== child) return;
+    desktopHostStopTimer = setTimeout(() => {
+      if (desktopHostProcess === child) child.kill();
+    }, 1500);
+  });
+}
+
+function restartDesktopHostForMonitorChange() {
+  const child = desktopHostProcess;
+  if (!child || !desktopHostEnabled) return;
+  stoppingDesktopHost = true;
+  restartDesktopHostOnExit = true;
+  void sendDesktopHostCommand('shutdown', 1000).then((response) => {
+    if (response?.ok || desktopHostProcess !== child) return;
+    desktopHostStopTimer = setTimeout(() => {
+      if (desktopHostProcess === child) child.kill();
+    }, 1500);
   });
 }
 
@@ -502,6 +729,51 @@ function createSplashWindow() {
   splashWindow.on('closed', () => (splashWindow = null));
 }
 
+/** Open Live Core as a separate SARA desktop-app window, never as a browser tab. */
+function openLiveCoreWindow() {
+  if (liveCoreWindow && !liveCoreWindow.isDestroyed()) {
+    if (liveCoreWindow.isMinimized()) liveCoreWindow.restore();
+    liveCoreWindow.show();
+    liveCoreWindow.focus();
+    return;
+  }
+
+  liveCoreWindow = new BrowserWindow({
+    width: 1440,
+    height: 900,
+    minWidth: 800,
+    minHeight: 600,
+    show: false,
+    backgroundColor: '#03050a',
+    autoHideMenuBar: true,
+    title: 'SARA Live Core',
+    icon: APP_ICON,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      backgroundThrottling: true,
+    },
+  });
+
+  liveCoreWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('http') && !url.startsWith(SERVER_ORIGIN)) {
+      shell.openExternal(url);
+    }
+    return { action: 'deny' };
+  });
+  liveCoreWindow.once('ready-to-show', () => {
+    liveCoreWindow?.show();
+  });
+  liveCoreWindow.on('closed', () => { liveCoreWindow = null; });
+  liveCoreWindow.webContents.on('render-process-gone', () => {
+    if (liveCoreWindow && !liveCoreWindow.isDestroyed()) liveCoreWindow.webContents.reload();
+  });
+  liveCoreWindow.loadURL(`${SERVER_ORIGIN}/?mode=live-core`).catch((error) => {
+    console.error('[Live Core] Could not load desktop surface:', error && error.message);
+  });
+}
+
 function createMainWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -535,16 +807,19 @@ function createMainWindow() {
 
   mainWindow.once('ready-to-show', () => {
     if (splashWindow) splashWindow.close();
-    mainWindow?.show();
-    mainWindow?.focus();
+    if (!launchedInBackground && !desktopHostEnabled) {
+      mainWindow?.show();
+      mainWindow?.focus();
+    }
   });
 
   mainWindow.on('closed', () => (mainWindow = null));
   mainWindow.on('focus', () => mainWindow?.flashFrame(false));
-  // With the desktop companion on, closing the main window keeps MYRAA in
-  // the tray instead of quitting.
+  // Keep the renderer (and therefore the connected microphone/voice session)
+  // alive when the user explicitly enables background mode. Preserve the
+  // existing companion close-to-tray behavior as well.
   mainWindow.on('close', (event) => {
-    if (!isQuitting && shellSettings?.companion?.enabled) {
+    if (!isQuitting && (shellSettings?.autonomy?.keepRunningInBackground || shellSettings?.companion?.enabled || shellSettings?.desktopHost?.enabled)) {
       event.preventDefault();
       mainWindow?.hide();
     }
@@ -558,6 +833,26 @@ function createMainWindow() {
   // renderer. This main-process handler selects the display without trying to
   // serialize a live MediaStream through contextBridge.
   // ---------------------------------------------------------------------------
+  let selectedCaptureSourceId = null;
+  ipcMain.removeHandler('screen:set-source');
+  ipcMain.removeAllListeners('screen:set-source');
+  // Keep selection synchronous so the renderer can set the chosen source and
+  // call getDisplayMedia in the same trusted click gesture.
+  ipcMain.on('screen:set-source', (event, sourceId) => {
+    selectedCaptureSourceId = typeof sourceId === 'string' && sourceId.trim() ? sourceId.trim() : null;
+    event.returnValue = { ok: true, sourceId: selectedCaptureSourceId };
+  });
+  ipcMain.removeAllListeners('screen:set-active');
+  ipcMain.on('screen:set-active', (event, active) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents) {
+      event.returnValue = { ok: false };
+      return;
+    }
+    // Keep the approved capture sampler responsive while SARA is minimized.
+    // Timer throttling is disabled only for the lifetime of explicit sharing.
+    mainWindow.webContents.setBackgroundThrottling(!Boolean(active));
+    event.returnValue = { ok: true };
+  });
   ipcMain.removeHandler('screen:get-sources');
   ipcMain.handle('screen:get-sources', async (_event, options) => {
     try {
@@ -585,19 +880,29 @@ function createMainWindow() {
     const ses = session.defaultSession;
     if (ses && typeof ses.setDisplayMediaRequestHandler === 'function') {
       ses.setDisplayMediaRequestHandler(async (request, callback) => {
+        // The renderer may resume a source that the user explicitly selected
+        // and enabled for auto-resume. Any source not already selected still
+        // requires the normal visible picker flow.
         if (!request.videoRequested || !request.securityOrigin.startsWith(SERVER_ORIGIN)) {
-          callback({});
+          callback(null);
           return;
         }
 
         try {
-          const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()) || screen.getPrimaryDisplay();
           const sources = await desktopCapturer.getSources({
-            types: ['screen'],
+            // Keep this in sync with screen:get-sources: the renderer may
+            // explicitly choose either a monitor or an application window.
+            types: ['screen', 'window'],
             thumbnailSize: { width: 0, height: 0 },
             fetchWindowIcons: false,
           });
-          const source = sources.find((candidate) => String(candidate.display_id) === String(display.id)) || sources[0];
+          const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()) || screen.getPrimaryDisplay();
+          const selected = selectedCaptureSourceId && sources.find((candidate) => candidate.id === selectedCaptureSourceId);
+          const source = selected
+            || sources.find((candidate) => candidate.id === `screen:${display.id}:0`)
+            || sources.find((candidate) => String(candidate.display_id) === String(display.id))
+            || sources.find((candidate) => candidate.id.startsWith('screen:'))
+            || sources[0];
           callback(source ? { video: source } : {});
         } catch (error) {
           console.error('[display media handler] source selection failed:', error);
@@ -655,7 +960,7 @@ function createMainWindow() {
     });
   }
 
-  mainWindow.loadURL(SERVER_ORIGIN);
+  mainWindow.loadURL(`${SERVER_ORIGIN}${desktopHostEnabled ? '/?mode=desktop-host-owner' : '/'}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -668,6 +973,7 @@ let companion = null;
 let tray = null;
 let shellSettings = null;
 let registeredShortcut = null;
+let registeredAssistantShortcut = null;
 let stopRawInput = () => undefined;
 
 function sendToBackend(message) {
@@ -724,8 +1030,14 @@ function ownPids() {
 
 function applyShellSettings(settings) {
   if (!settings || typeof settings !== 'object') return;
+  const previousMonitor = shellSettings?.desktopHost?.monitorDevice;
+  const previousDesktopHostEnabled = desktopHostEnabled;
   shellSettings = settings;
   companion?.applySettings(settings);
+  setDesktopHostEnabled(Boolean(settings.desktopHost?.enabled));
+  if (previousDesktopHostEnabled !== desktopHostEnabled) mainWindow?.webContents.send('app:desktop-host-mode', desktopHostEnabled);
+  if (previousDesktopHostEnabled && !desktopHostEnabled && mainWindow && !mainWindow.isVisible()) openMainWindow();
+  if (previousMonitor !== undefined && previousMonitor !== settings.desktopHost?.monitorDevice) restartDesktopHostForMonitorChange();
   // Emergency stop shortcut (always available, even when MYRAA is hidden).
   const accelerator = settings.autonomy?.emergencyShortcut || 'Control+Alt+Shift+S';
   if (accelerator !== registeredShortcut) {
@@ -741,17 +1053,47 @@ function applyShellSettings(settings) {
       console.warn('[shell] invalid emergency shortcut:', error && error.message);
     }
   }
+  // System-wide shortcut to bring the existing SARA interface forward.
+  const assistantAccelerator = settings.autonomy?.assistantShortcut || 'Control+Alt+Space';
+  if (assistantAccelerator !== registeredAssistantShortcut) {
+    if (registeredAssistantShortcut) globalShortcut.unregister(registeredAssistantShortcut);
+    registeredAssistantShortcut = null;
+    try {
+      if (assistantAccelerator !== accelerator && globalShortcut.register(assistantAccelerator, openMainWindow)) {
+        registeredAssistantShortcut = assistantAccelerator;
+      } else {
+        console.warn(`[shell] assistant shortcut ${assistantAccelerator} could not be registered (possibly in use or conflicts with emergency stop)`);
+      }
+    } catch (error) {
+      console.warn('[shell] invalid assistant shortcut:', error && error.message);
+    }
+  }
   updateTrayMenu();
 }
 
 function saveShellSettings(patch) {
   void backendRequest('POST', '/api/app-settings', patch).then((next) => {
-    if (next && typeof next === 'object' && next.companion) applyShellSettings(next);
+    // Keep lifecycle and tray decisions in sync immediately after any settings
+    // change, not only after companion settings are edited. In particular,
+    // close-to-tray must honor a newly enabled/disabled background mode without
+    // requiring an application restart.
+    if (next && typeof next === 'object') applyShellSettings(next);
   });
 }
 
 function openMainWindow() {
   if (!mainWindow) createMainWindow();
+  if (desktopHostEnabled) {
+    void sendDesktopHostCommand('show').then((response) => {
+      // Keep the normal Electron window as a safe fallback if the optional
+      // surface is unavailable; it is never shown while the host is healthy.
+      if (!response && mainWindow && !mainWindow.isVisible()) {
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    });
+    return;
+  }
   mainWindow?.show();
   mainWindow?.focus();
 }
@@ -761,6 +1103,16 @@ function openStudio() {
   mainWindow?.webContents.send('app:open-studio');
 }
 
+function ensurePackagedAutoStart() {
+  if (process.platform !== 'win32' || !app.isPackaged || process.env.SARA_DISABLE_AUTOSTART === '1') return;
+  try {
+    app.setLoginItemSettings({ path: app.getPath('exe'), args: ['--sara-background'], openAtLogin: true });
+    console.log('[startup] SARA registered for automatic post-login startup.');
+  } catch (error) {
+    console.warn('[startup] automatic registration unavailable:', error && error.message);
+  }
+}
+
 function emergencyStop() {
   sendToBackend({ type: 'shortcut.emergency-stop' });
 }
@@ -768,8 +1120,21 @@ function emergencyStop() {
 function updateTrayMenu() {
   if (!tray) return;
   const companionOn = Boolean(shellSettings?.companion?.enabled);
+  const keepRunning = Boolean(shellSettings?.autonomy?.keepRunningInBackground);
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Open Sara', click: openMainWindow },
+    { label: 'Open SARA Live Core', click: openLiveCoreWindow },
+    { label: liveCoreSurfaceProcess && liveCoreSurfaceProcess.exitCode === null ? 'Stop Live Core desktop surface' : 'Start Live Core desktop surface', click: toggleLiveCoreSurface },
+    ...(desktopHostEnabled ? [{ label: 'Show native SARA panel', click: () => { void sendDesktopHostCommand('show'); } }] : []),
+    {
+      label: 'Keep Sara running when closed',
+      type: 'checkbox',
+      checked: keepRunning,
+      click: (item) => {
+        saveShellSettings({ autonomy: { keepRunningInBackground: item.checked } });
+        if (!item.checked) openMainWindow();
+      },
+    },
     { label: companionOn ? 'Hide desktop companion' : 'Show desktop companion', click: () => saveShellSettings({ companion: { enabled: !companionOn } }) },
     ...(companionOn ? [{ label: 'Call her here', click: () => companion?.summon() }] : []),
     ...(companion?.hasMovedIcons ? [{ label: 'Put the desktop icons back', click: () => void companion?.restoreIcons() }] : []),
@@ -825,6 +1190,68 @@ function startShell() {
     });
     return result.canceled || !result.filePaths[0] ? null : result.filePaths[0];
   });
+
+  const startupOptions = { path: app.getPath('exe'), args: ['--sara-background'] };
+  const startupStatus = () => {
+    const supported = process.platform === 'win32' && app.isPackaged;
+    return {
+      supported,
+      enabled: supported ? app.getLoginItemSettings(startupOptions).openAtLogin : false,
+    };
+  };
+  ipcMain.removeHandler('startup:get-status');
+  ipcMain.handle('startup:get-status', (event) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents) return { supported: false, enabled: false };
+    return startupStatus();
+  });
+  ipcMain.removeHandler('startup:set-enabled');
+  ipcMain.handle('startup:set-enabled', (event, enabled) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents) return { supported: false, enabled: false };
+    if (process.platform !== 'win32' || !app.isPackaged) return { supported: false, enabled: false };
+    try {
+      app.setLoginItemSettings({ ...startupOptions, openAtLogin: Boolean(enabled) });
+      return startupStatus();
+    } catch (error) {
+      console.warn('[startup] could not update per-user login registration:', error && error.message);
+      return { ...startupStatus(), error: 'Windows startup registration could not be changed.' };
+    }
+  });
+  ipcMain.removeHandler('desktop-host:get-status');
+  ipcMain.handle('desktop-host:get-status', async (event) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents) return { ok: false, available: false, error: 'Untrusted renderer.' };
+    if (process.platform !== 'win32') return { ok: false, available: false, error: 'Windows DesktopHost is unavailable.' };
+    const status = await sendDesktopHostCommand('status', 1200);
+    return status && typeof status === 'object'
+      ? { ok: true, available: true, status }
+      : { ok: false, available: false, error: 'DesktopHost status unavailable.' };
+  });
+  ipcMain.removeHandler('live-core:open');
+  ipcMain.handle('live-core:open', (event) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents) {
+      return { ok: false, error: 'Untrusted renderer.' };
+    }
+    openLiveCoreWindow();
+    return { ok: true };
+  });
+  ipcMain.removeHandler('live-core:surface-status');
+  ipcMain.handle('live-core:surface-status', (event) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents) return { ok: false, error: 'Untrusted renderer.' };
+    return {
+      ok: true,
+      supported: process.platform === 'win32',
+      built: Boolean(liveCoreSurfaceExecutable()),
+      running: Boolean(liveCoreSurfaceProcess && liveCoreSurfaceProcess.exitCode === null),
+      behindIcons: false,
+    };
+  });
+  ipcMain.removeHandler('live-core:surface-set');
+  ipcMain.handle('live-core:surface-set', (event, enabled) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents) return { ok: false, error: 'Untrusted renderer.' };
+    if (Boolean(enabled)) toggleLiveCoreSurface();
+    else stopLiveCoreSurface();
+    const running = Boolean(liveCoreSurfaceProcess && liveCoreSurfaceProcess.exitCode === null);
+    return { ok: true, running, built: Boolean(liveCoreSurfaceExecutable()), behindIcons: false };
+  });
 }
 
 /** Physical vs synthetic input, aggregated before it reaches the backend. */
@@ -859,7 +1286,11 @@ function handleRuntimeMessage(message) {
       companion?.handleCommand(String(message.command || ''));
       break;
     case 'runtime:notify':
-      if (Notification.isSupported()) new Notification({ title: String(message.title || 'Sara'), body: String(message.body || ''), icon: APP_ICON }).show();
+      if (Notification.isSupported()) {
+        const notice = new Notification({ title: String(message.title || 'Sara').slice(0, 120), body: String(message.body || '').slice(0, 1000), icon: APP_ICON });
+        notice.on('click', openMainWindow);
+        notice.show();
+      }
       break;
     case 'runtime:attention': {
       // A task waits for approval or an answer. The main window shows the
@@ -883,14 +1314,22 @@ function handleRuntimeMessage(message) {
 // ---------------------------------------------------------------------------
 async function bootstrap() {
   app.setAppUserModelId('com.myraa.desktop');
+  ensurePackagedAutoStart();
   installCrashRecovery();
-  createSplashWindow();
+  // Windows login startup is intentionally quiet: keep the normal splash for
+  // interactive launches, but do not flash a window for --sara-background.
+  if (!launchedInBackground) createSplashWindow();
 
   try {
     SERVER_PORT = await choosePort();
     SERVER_ORIGIN = `http://127.0.0.1:${SERVER_PORT}`;
     startBackend();
     await waitForBackend(SERVER_READY_TIMEOUT_MS);
+    const initialSettings = await backendRequest('GET', '/api/app-settings');
+    if (initialSettings && typeof initialSettings === 'object') {
+      shellSettings = initialSettings;
+      desktopHostEnabled = process.platform === 'win32' && Boolean(initialSettings.desktopHost?.enabled);
+    }
     createMainWindow();
     startShell();
   } catch (err) {
@@ -908,6 +1347,7 @@ async function bootstrap() {
 // ---------------------------------------------------------------------------
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
+  else openMainWindow();
 });
 
 app.on('will-quit', () => {
@@ -916,13 +1356,13 @@ app.on('will-quit', () => {
 });
 
 app.on('window-all-closed', () => {
-  // Phase 2 introduces close-to-tray; for now quitting when all windows close
-  // is the expected behaviour on Windows.
-  if (process.platform !== 'darwin') app.quit();
+  if (process.platform !== 'darwin' && !shellSettings?.autonomy?.keepRunningInBackground) app.quit();
 });
 
 app.on('before-quit', () => {
   isQuitting = true;
+  stopLiveCoreSurface();
+  setDesktopHostEnabled(false);
   stopBackend();
 });
 

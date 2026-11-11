@@ -10,7 +10,7 @@
  */
 import { Type } from "@google/genai";
 import { publicTaskView, TERMINAL_STATES } from "../agent/taskSession";
-import type { MyraaRuntime } from "../runtime/myraaRuntime";
+import type { SaraRuntime } from "../runtime/saraRuntime";
 
 export const LIVE_AGENT_INSTRUCTIONS = [
   "AUTONOMOUS TASKS:",
@@ -122,7 +122,7 @@ export const LIVE_AGENT_TOOL_DECLARATIONS = [
 
 export const LIVE_AGENT_TOOL_NAMES = new Set(LIVE_AGENT_TOOL_DECLARATIONS.map((tool) => tool.name));
 
-export async function handleLiveAgentTool(runtime: MyraaRuntime, name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+export async function handleLiveAgentTool(runtime: SaraRuntime, name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
   const active = () => runtime.tasks.active().find((session) => !TERMINAL_STATES.has(session.state)) || null;
   switch (name) {
     case "startTask": {

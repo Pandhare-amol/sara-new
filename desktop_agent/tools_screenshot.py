@@ -108,13 +108,13 @@ def _capture_region_gdi(bbox):
 def _capture_region_mss(bbox):
     """Capture a physical rectangle with the headless-safe MSS backend."""
     from PIL import Image
-    from mss import mss
+    from mss import MSS
 
     left, top, right, bottom = (int(value) for value in bbox)
     width, height = right - left, bottom - top
     if width <= 0 or height <= 0:
         raise ValueError("Capture bounds are empty.")
-    with mss() as capture:
+    with MSS() as capture:
         shot = capture.grab({"left": left, "top": top, "width": width, "height": height})
         return Image.frombytes("RGB", shot.size, shot.rgb)
 

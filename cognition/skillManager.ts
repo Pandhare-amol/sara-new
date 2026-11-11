@@ -120,6 +120,12 @@ export class SkillManager {
       .map((skill) => structuredClone(skill));
   }
 
+  search(query: string, projectId?: string | null): LearnedSkill[] {
+    this.assertLoaded(); const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (!terms.length) return this.list(projectId);
+    return this.list(projectId).filter((skill) => { const text = `${skill.name} ${skill.description} ${skill.expectedOutcome} ${skill.preconditions.join(" ")}`.toLowerCase(); return terms.every((term) => text.includes(term)); }).sort((a, b) => b.successRate - a.successRate || b.confidence - a.confidence);
+  }
+
   private async persist(): Promise<void> {
     const payload: SkillFile = { version: 1, skills: this.skills };
     this.writeQueue = this.writeQueue.then(async () => {

@@ -76,6 +76,8 @@ export interface ExecutorDeps {
   notify: (title: string, body: string) => void;
   /** Seconds to wait for the user to stop using the mouse before yielding. */
   conflictWaitMs?: number;
+  /** Backend owner-authentication gate; desktop tools fail closed when absent. */
+  authorize?: () => boolean;
 }
 
 const POINTER_TOOLS = new Set(["ui.double_click", "ui.right_click", "ui.scroll", "mouse.click_point", "mouse.drag"]);
@@ -132,6 +134,10 @@ export class ActionExecutor {
     if (!definition) return fail("INVALID_ACTION", `Unknown action '${action.tool}'. Use only listed actions.`);
     if (action.tool === "task.ask_user" || action.tool === "task.finish") {
       return fail("INVALID_ACTION", "task.* actions are handled by the task loop.");
+    }
+    if (this.deps.authorize && !this.deps.authorize()) {
+      this.deps.audit.record(context.taskId, "permission", "Desktop action rejected: owner authentication is locked or expired.");
+      return fail("PERMISSION_DENIED", "Sara is locked. Authenticate the enrolled owner before using PC-control tools.", "Owner authentication required");
     }
     const args = { ...(action.args || {}) };
     const validation = validateJson(args, definition.args);
@@ -597,7 +603,17 @@ export class ActionExecutor {
           changesUi: false,
         });
       }
-      case "fs.open":
+      case "fs.open": {
+        const response = await call("openPath", {
+          path: args.path,
+          ...(args.__executable ? { allow_executable: true } : {}),
+        });
+        if (!response.ok) return failed(response.error);
+        return ok(`Opened ${fileName(args.path)}`, undefined, {
+          files: [{ path: String(args.path), change: "opened" }],
+          verification: { passed: true, evidence: String((response.result as Record<string, unknown>)?.result || `Opened ${fileName(args.path)}.`), method: "deterministic" },
+        });
+      }
       case "fs.select": {
         const response = await call("selectFiles", { folder: args.folder, extension: args.extension, pattern: args.pattern, names: args.names });
         if (!response.ok) return failed(response.error);

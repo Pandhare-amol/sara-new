@@ -1,10 +1,13 @@
-# Sara 1.5.2 — source code mayra 
+# Sara 1.5.2
 
 Sara is a 3D AI companion for Windows: she talks with you by voice (Google Gemini Live),
 can see your screen when you allow it, controls apps and files on your PC, and lives on your
 desktop as a character you can drag onto windows.
 
 This pack is the full source. If you just want to use Sara, install the setup .exe instead.
+
+For the current Windows integration, desktop-shell gaps, and activation gates, see
+[the SARA OS status](docs/SARA_OS_STATUS.md) and [the roadmap](docs/SARA_OS_ROADMAP.md).
 
 ## What is NOT included (on purpose)
 

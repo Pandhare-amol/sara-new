@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef, type FormEvent } from "react";
-import { MyraaAudioSession, LiveState } from "./lib/audio";
-import { MyraaCoreVisualizer, MyraaEmotion } from "./components/MyraaCoreVisualizer";
+import { useState, useEffect, useRef, lazy, Suspense, type FormEvent } from "react";
+import { SaraAudioSession, LiveState, type AudioDiagnostics, type LiveToolTaskProgress } from "./lib/saraAudio";
+import { SaraCoreVisualizer, type SaraEmotion } from "./components/SaraCoreVisualizer";
 import { CharacterStudio } from "./components/character/CharacterStudio";
 import { 
   Power, 
   Volume2, 
+  VolumeX,
   Info, 
   Sparkles, 
   MessageSquareOff, 
@@ -15,25 +16,29 @@ import {
   X,
   Brain,
   Monitor,
+  Camera,
   Play,
   Pause,
   Square,
   RefreshCw,
   Settings as SettingsIcon,
   Send
+  ,Activity
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Memory, MemoryCategory } from "./lib/memoryTypes";
 import { MemoryDashboard } from "./components/MemoryDashboard";
+const SystemDashboard = lazy(() => import("./components/SystemDashboard").then((module) => ({ default: module.SystemDashboard })));
 import { SettingsPanel, type SettingsSection } from "./components/SettingsPanel";
 import { TaskHud } from "./components/TaskHud";
+import { LiveToolTaskHud } from "./components/LiveToolTaskHud";
 import { ModelChip } from "./components/ModelSelector";
 import { Onboarding } from "./components/Onboarding";
 import { api, type AppSettings, type AppSettingsPatch } from "./lib/appApi";
 import { useAppEvents } from "./lib/useAppEvents";
 import { setCharacterRealism } from "./character/materials/AnimeMaterial";
-import { MyraaSettings, DEFAULT_SETTINGS, loadSettings, saveSettings } from "./lib/settingsStore";
-import { MyraaWakeWordDetector } from "./lib/wakeWord";
+import { SaraSettings, DEFAULT_SETTINGS, loadSettings, saveSettings } from "./lib/saraSettingsStore";
+import { SaraWakeWordDetector } from "./lib/saraWakeWord";
 
 export default function App() {
   const [state, setState] = useState<LiveState>("disconnected");
@@ -42,26 +47,46 @@ export default function App() {
   const [isScreenSharing, setIsScreenSharing] = useState<boolean>(false);
   const [isScreenSharingPaused, setIsScreenSharingPaused] = useState<boolean>(false);
   const [screenVisionMode, setScreenVisionMode] = useState<boolean>(true);
+  const [showScreenSourcePicker, setShowScreenSourcePicker] = useState(false);
+  const [screenSources, setScreenSources] = useState<Array<{ id: string; name: string; thumbnail?: string | null; display_id?: string | null }>>([]);
+  const [screenMetrics, setScreenMetrics] = useState({ captured: 0, sent: 0, skipped: 0, dropped: 0, lastFrameAt: 0 });
   // On-demand screen-vision lifecycle (e.g. "what is on my screen?"). Distinct
   // from the manual SHARE SCREEN flow — this is Sara briefly peeking.
   const [screenVisionLiveState, setScreenVisionLiveState] = useState<"idle" | "capturing" | "ready" | "error">("idle");
 
-  // References to preserve state across intervals
+  // The live user-approved stream comes from Electron getDisplayMedia;
+  // Python screenshots remain a separate on-demand fallback only.
+  const [screenPreviewUrl, setScreenPreviewUrl] = useState<string | null>(null);
+  const isScreenSharingRef = useRef(false);
+  const screenCaptureInFlightRef = useRef(false);
+  const screenStartInFlightRef = useRef(false);
+  const autoResumeAttemptedRef = useRef(false);
+  const screenCaptureGenerationRef = useRef(0);
+  const screenIntervalRef = useRef<any>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
   const screenVideoRef = useRef<HTMLVideoElement | null>(null);
   const screenCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const screenDiffCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const lastScreenLumaRef = useRef<Uint8Array | null>(null);
-  const lastScreenFrameSentAtRef = useRef<number>(0);
-  const lastScreenChangeScoreRef = useRef<number>(0);
-  const lastScreenHeartbeatRef = useRef<boolean>(false);
-  const screenIntervalRef = useRef<any>(null);
+  const lastScreenSentAtRef = useRef(0);
+
+  const setNativeCaptureActive = (active: boolean) => {
+    const bridgeWindow = window as unknown as {
+      sara?: { setDesktopCaptureActive?: (value: boolean) => unknown };
+      myraa?: { setDesktopCaptureActive?: (value: boolean) => unknown };
+    };
+    try { (bridgeWindow.sara ?? bridgeWindow.myraa)?.setDesktopCaptureActive?.(active); } catch { /* best effort */ }
+  };
 
   const isPausedRef = useRef<boolean>(false);
   const screenVisionRef = useRef<boolean>(true);
   const stateRef = useRef<LiveState>("disconnected");
 
   // Sync state changes with refs to totally prevent stale closures in callbacks
+  useEffect(() => {
+    isScreenSharingRef.current = isScreenSharing;
+  }, [isScreenSharing]);
+
   useEffect(() => {
     isPausedRef.current = isScreenSharingPaused;
   }, [isScreenSharingPaused]);
@@ -80,237 +105,276 @@ export default function App() {
       if (screenIntervalRef.current) {
         clearInterval(screenIntervalRef.current);
       }
+      screenStreamRef.current?.getTracks().forEach((track) => track.stop());
+      screenStreamRef.current = null;
+      sessionRef.current?.sendScreenSharingStopped();
+      setNativeCaptureActive(false);
     };
   }, []);
 
-  const shouldSendChangedScreenFrame = (video: HTMLVideoElement): boolean => {
-    if (!screenDiffCanvasRef.current) screenDiffCanvasRef.current = document.createElement("canvas");
-    const diffCanvas = screenDiffCanvasRef.current;
-    diffCanvas.width = 32;
-    diffCanvas.height = 18;
-    const diffContext = diffCanvas.getContext("2d", { willReadFrequently: true });
-    if (!diffContext) return true;
-    diffContext.drawImage(video, 0, 0, diffCanvas.width, diffCanvas.height);
-    const pixels = diffContext.getImageData(0, 0, diffCanvas.width, diffCanvas.height).data;
-    const luminance = new Uint8Array(diffCanvas.width * diffCanvas.height);
-    for (let source = 0, target = 0; source < pixels.length; source += 4, target += 1) {
-      luminance[target] = Math.round(
-        pixels[source] * 0.2126 + pixels[source + 1] * 0.7152 + pixels[source + 2] * 0.0722,
-      );
-    }
+  const captureFrameAndSend = async (force = false) => {
+    if ((!isScreenSharingRef.current && !force) || isPausedRef.current || !screenVisionRef.current || screenCaptureInFlightRef.current) return;
 
-    const previous = lastScreenLumaRef.current;
-    const heartbeatDue = Date.now() - lastScreenFrameSentAtRef.current >= 30_000;
-    let changed = !previous;
-    let changeScore = previous ? 0 : 100;
-    if (previous) {
-      let totalDelta = 0;
-      for (let i = 0; i < luminance.length; i++) totalDelta += Math.abs(luminance[i] - previous[i]);
-      changeScore = totalDelta / luminance.length;
-      changed = changeScore >= 7;
-    }
-    if (!changed && !heartbeatDue) return false;
-    lastScreenLumaRef.current = luminance;
-    lastScreenFrameSentAtRef.current = Date.now();
-    lastScreenChangeScoreRef.current = changeScore;
-    lastScreenHeartbeatRef.current = !changed && heartbeatDue;
-    return true;
-  };
-
-  const captureFrameAndSend = () => {
-    const video = screenVideoRef.current;
-    if (!video || isPausedRef.current || !screenVisionRef.current) {
-      return;
-    }
-
-    if (stateRef.current === "disconnected") {
-      return;
-    }
-
+    const generation = screenCaptureGenerationRef.current;
+    screenCaptureInFlightRef.current = true;
     try {
-      if (video.videoWidth === 0 || video.videoHeight === 0) return;
-
-      if (!screenCanvasRef.current) {
-        screenCanvasRef.current = document.createElement("canvas");
-      }
-      const canvas = screenCanvasRef.current;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-
-      // Restrict maximum resolution size to keep payload light for Gemini Live
-      const maxDim = 720;
-      let width = video.videoWidth;
-      let height = video.videoHeight;
-
-      if (width > maxDim || height > maxDim) {
-        if (width > height) {
-          height = Math.round((height * maxDim) / width);
-          width = maxDim;
-        } else {
-          width = Math.round((width * maxDim) / height);
-          height = maxDim;
+      const video = screenVideoRef.current;
+      const session = sessionRef.current;
+      if (video && video.videoWidth > 0 && video.videoHeight > 0) {
+        const canvas = screenCanvasRef.current || document.createElement("canvas");
+        screenCanvasRef.current = canvas;
+        const maxDim = 1440;
+        const scale = Math.min(1, maxDim / Math.max(video.videoWidth, video.videoHeight));
+        canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+        canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("Screen canvas is unavailable.");
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        // Cheap local change detection prevents unchanged frames from
+        // reaching Gemini. The full frame is still retained for the preview.
+        const diffCanvas = screenDiffCanvasRef.current || document.createElement("canvas");
+        screenDiffCanvasRef.current = diffCanvas;
+        diffCanvas.width = 64;
+        diffCanvas.height = 36;
+        const diffContext = diffCanvas.getContext("2d", { willReadFrequently: true });
+        if (!diffContext) throw new Error("Screen change detector is unavailable.");
+        diffContext.drawImage(video, 0, 0, 64, 36);
+        const pixels = diffContext.getImageData(0, 0, 64, 36).data;
+        const luma = new Uint8Array(64 * 36);
+        let totalDelta = 0;
+        for (let i = 0; i < luma.length; i++) {
+          const offset = i * 4;
+          luma[i] = Math.round(pixels[offset] * 0.2126 + pixels[offset + 1] * 0.7152 + pixels[offset + 2] * 0.0722);
+          if (lastScreenLumaRef.current) totalDelta += Math.abs(luma[i] - lastScreenLumaRef.current[i]);
         }
+        const changeScore = lastScreenLumaRef.current ? totalDelta / luma.length : 100;
+        const heartbeat = Date.now() - lastScreenSentAtRef.current >= 10_000;
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.78);
+        if (generation !== screenCaptureGenerationRef.current || !screenStreamRef.current) return;
+        setScreenPreviewUrl(dataUrl);
+        const capturedAt = Date.now();
+        setScreenMetrics((current) => ({ ...current, captured: current.captured + 1, lastFrameAt: capturedAt }));
+        if (lastScreenLumaRef.current && changeScore < 1.2 && !heartbeat) {
+          setScreenMetrics((current) => ({ ...current, skipped: current.skipped + 1 }));
+          return;
+        }
+        lastScreenLumaRef.current = luma;
+        lastScreenSentAtRef.current = Date.now();
+        const image = dataUrl.slice(dataUrl.indexOf(",") + 1);
+        if (!session || !session.sendVideoFrame(image, {
+          changeScore, heartbeat, width: canvas.width, height: canvas.height, capturedAt,
+        })) {
+          setScreenMetrics((current) => ({ ...current, dropped: current.dropped + 1 }));
+        } else {
+          setScreenMetrics((current) => ({ ...current, sent: current.sent + 1 }));
+        }
+        return;
       }
 
-      canvas.width = width;
-      canvas.height = height;
+      // An active native stream is the source of truth. Do not fall back to a
+      // different full-display screenshot if its video track is not ready.
+      if (screenStreamRef.current) return;
 
-      ctx.drawImage(video, 0, 0, width, height);
-
-      // Local frame-difference gating prevents unchanged screens from being
-      // uploaded every two seconds. A sparse heartbeat keeps long static views
-      // available when screen sharing is explicitly enabled.
-      if (!shouldSendChangedScreenFrame(video)) return;
-
-      // Continuous awareness uses a compact frame. Exact click/OCR tools always
-      // take a fresh native screenshot, so this saves bandwidth without reducing
-      // mouse-targeting accuracy.
-      const dataUrl = canvas.toDataURL("image/jpeg", 0.45);
-      const base64 = dataUrl.split(",")[1];
-
-      if (sessionRef.current && stateRef.current !== "disconnected") {
-        sessionRef.current.sendVideoFrame(base64, {
-          changeScore: lastScreenChangeScoreRef.current,
-          heartbeat: lastScreenHeartbeatRef.current,
-        });
+      // Fallback for a browser/dev environment or a denied native stream.
+      const response = await fetch("/api/screen-vision", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ max_dim: 720, keep_file: false }),
+        cache: "no-store",
+      });
+      const payload = await response.json() as {
+        ok?: boolean;
+        image_base64?: string;
+        image_mime?: string;
+        error?: string;
+      };
+      if (generation !== screenCaptureGenerationRef.current || !isScreenSharingRef.current) return;
+      if (!response.ok || payload.ok === false || !payload.image_base64) {
+        throw new Error(payload.error || `Screen capture failed (${response.status}).`);
       }
-    } catch (err) {
-      console.error("[Screen Capture] Failed drawing frame to canvas:", err);
+        setScreenPreviewUrl(`data:${payload.image_mime || "image/jpeg"};base64,${payload.image_base64}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn("[Screen Capture] Snapshot failed:", message);
+      setErrorText(`Could not capture screen: ${message}`);
+    } finally {
+      screenCaptureInFlightRef.current = false;
     }
   };
 
-  const startScreenSharing = async () => {
+  const openScreenSourcePicker = async () => {
     setErrorText(null);
     try {
-      // Keep the MediaStream in the renderer where it was created. Live DOM
-      // objects cannot cross Electron's contextBridge; returning one from the
-      // preload produces an object that video.srcObject correctly rejects.
-      // The Electron main process supplies the selected desktop source through
-      // setDisplayMediaRequestHandler, while a normal browser shows its picker.
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: {
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          frameRate: { ideal: 2 }
-        },
-        audio: false
-      });
-
-      const videoTrack = stream.getVideoTracks()[0];
-      if (!videoTrack) {
-        stream.getTracks().forEach((track) => track.stop());
-        throw new Error("The selected screen did not provide a video track.");
+      const desktopWindow = window as unknown as { sara?: {
+        getDesktopCaptureSources?: () => Promise<Array<{ id: string; name: string; display_id?: string | null }>>;
+        setDesktopCaptureSource?: (id: string) => unknown;
+        setDesktopCaptureActive?: (active: boolean) => unknown;
+      }; myraa?: {
+        getDesktopCaptureSources?: () => Promise<Array<{ id: string; name: string; display_id?: string | null }>>;
+        setDesktopCaptureSource?: (id: string) => unknown;
+        setDesktopCaptureActive?: (active: boolean) => unknown;
+      } };
+      const desktop = desktopWindow.sara ?? desktopWindow.myraa;
+      if (desktop?.getDesktopCaptureSources && desktop.setDesktopCaptureSource) {
+        const sources = await desktop.getDesktopCaptureSources();
+        if (sources.length) {
+          setScreenSources(sources);
+          setShowScreenSourcePicker(true);
+          return;
+        }
       }
+      // Browser/dev build: getDisplayMedia must be invoked directly from the
+      // user's click so the browser's native picker can retain user activation.
+      await startScreenSharing();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setErrorText(`Could not list screen sources: ${message}`);
+    }
+  };
 
-      screenStreamRef.current = stream;
+  async function startScreenSharing(sourceId?: string, autoResume = false) {
+    if (screenStartInFlightRef.current || screenStreamRef.current) return;
+    screenStartInFlightRef.current = true;
+    setErrorText(null);
+    try {
+      const desktopWindow = window as unknown as { sara?: {
+        setDesktopCaptureSource?: (id: string) => unknown;
+      }; myraa?: { setDesktopCaptureSource?: (id: string) => unknown } };
+      const desktop = desktopWindow.sara ?? desktopWindow.myraa;
+      if (sourceId && desktop?.setDesktopCaptureSource) desktop.setDesktopCaptureSource(sourceId);
+      if (sourceId && !autoResume) window.localStorage.setItem("sara.screen.source.v1", sourceId);
 
+      // Invoke capture before the first await in this user-gesture handler.
+      const captureRequest = navigator.mediaDevices.getDisplayMedia({
+        video: { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 1, max: 1 } },
+        audio: false,
+      });
+      const stream = await captureRequest;
+      screenCaptureGenerationRef.current += 1;
+      const track = stream.getVideoTracks()[0];
+      if (!track) {
+        stream.getTracks().forEach((item) => item.stop());
+        throw new Error("No screen video track was returned.");
+      }
       const video = document.createElement("video");
       video.srcObject = stream;
       video.muted = true;
       video.playsInline = true;
-      video.play().catch(e => console.error("Video play warning:", e));
+      await video.play();
+      screenStreamRef.current = stream;
       screenVideoRef.current = video;
-
+      setNativeCaptureActive(true);
+      track.onended = () => stopScreenSharing();
+      setScreenMetrics({ captured: 0, sent: 0, skipped: 0, dropped: 0, lastFrameAt: 0 });
+      isScreenSharingRef.current = true;
+      isPausedRef.current = false;
       setIsScreenSharing(true);
       setIsScreenSharingPaused(false);
-
-      // Stop handling when native stop sharing bar button ends
-      videoTrack.onended = () => {
-        stopScreenSharing();
-      };
-
-      // Sample locally every 2.5 seconds; frame-difference gating sends only
-      // meaningful changes plus a sparse heartbeat.
-      if (screenIntervalRef.current) {
-        clearInterval(screenIntervalRef.current);
-      }
-      screenIntervalRef.current = setInterval(() => {
-        captureFrameAndSend();
-      }, 2500);
-
-      // Promptly capture first frame immediately
-      setTimeout(() => {
-        captureFrameAndSend();
-      }, 500);
-
-    } catch (e: any) {
-      console.error("Screen sharing permission declined or missing API:", e);
-      const message = e?.message || String(e);
-      // Suppress the user-cancel error (they dismissed the picker). Show a
-      // helpful hint for the "not supported" case so the user knows to use
-      // voice/text on-demand vision instead.
-      if (e?.name === "NotAllowedError" || /denied|cancel/i.test(message)) {
-        return; // user cancelled
-      }
-      if (/not supported/i.test(message)) {
-        setErrorText("Continuous screen sharing isn't supported in this build, but you can still ask Sara to look at your screen by saying 'what is on my screen?' or clicking SHARE SCREEN again.");
-      } else {
-        setErrorText(`Could not capture screen: ${message}`);
-      }
+      setShowScreenSourcePicker(false);
+      if (screenIntervalRef.current) clearInterval(screenIntervalRef.current);
+      screenIntervalRef.current = setInterval(() => { void captureFrameAndSend(); }, 1_000);
+      void captureFrameAndSend(true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (autoResume) {
+        setErrorText("Saved screen source could not be resumed. Choose it again from Share Screen.");
+        autoResumeAttemptedRef.current = false;
+      } else if (!/cancel|denied|notallowed/i.test(message)) setErrorText(`Could not start native screen sharing: ${message}`);
+    } finally {
+      screenStartInFlightRef.current = false;
     }
-  };
+  }
 
   const stopScreenSharing = () => {
+    screenCaptureGenerationRef.current += 1;
+    screenCaptureInFlightRef.current = false;
+    isScreenSharingRef.current = false;
+    isPausedRef.current = false;
     if (screenIntervalRef.current) {
       clearInterval(screenIntervalRef.current);
       screenIntervalRef.current = null;
     }
 
-    if (screenStreamRef.current) {
-      screenStreamRef.current.getTracks().forEach((track) => {
-        try {
-          track.stop();
-        } catch (e) {}
-      });
-      screenStreamRef.current = null;
-    }
-
-    if (screenVideoRef.current) {
-      screenVideoRef.current.pause();
-      screenVideoRef.current = null;
-    }
-
     setIsScreenSharing(false);
     setIsScreenSharingPaused(false);
+    setScreenPreviewUrl(null);
+    sessionRef.current?.sendScreenSharingStopped();
+    setNativeCaptureActive(false);
+    screenStreamRef.current?.getTracks().forEach((track) => track.stop());
+    screenStreamRef.current = null;
+    screenVideoRef.current = null;
+    setShowScreenSourcePicker(false);
     lastScreenLumaRef.current = null;
-    lastScreenFrameSentAtRef.current = 0;
-    lastScreenChangeScoreRef.current = 0;
-    lastScreenHeartbeatRef.current = false;
+    lastScreenSentAtRef.current = 0;
   };
 
   const pauseScreenSharing = () => {
+    isPausedRef.current = true;
     setIsScreenSharingPaused(true);
   };
 
   const resumeScreenSharing = () => {
+    isPausedRef.current = false;
     setIsScreenSharingPaused(false);
-    // Refresh first frame immediately
-    setTimeout(() => {
-      captureFrameAndSend();
-    }, 100);
+    void captureFrameAndSend();
   };
 
   const switchScreenShare = async () => {
-    if (screenStreamRef.current) {
-      screenStreamRef.current.getTracks().forEach((track) => {
-        try {
-          track.stop();
-        } catch (e) {}
-      });
-    }
-    await startScreenSharing();
+    stopScreenSharing();
+    await openScreenSourcePicker();
   };
 
-  const [activeEmotion, setActiveEmotion] = useState<MyraaEmotion>("idle");
+  const askCameraAboutScene = async () => {
+    const session = sessionRef.current;
+    if (!session || !appSettings?.privacy.cameraPresence) {
+      setErrorText("Enable camera access in Settings → Privacy first.");
+      return;
+    }
+    let stream: MediaStream | null = null;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+      const video = document.createElement("video");
+      video.srcObject = stream;
+      video.muted = true;
+      await video.play();
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 250));
+      const canvas = document.createElement("canvas");
+      const scale = Math.min(1, 1280 / Math.max(video.videoWidth, video.videoHeight));
+      canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+      canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+      canvas.getContext("2d")?.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const image = canvas.toDataURL("image/jpeg", 0.78).split(",")[1];
+      if (!image || !session.sendCameraFrame(image)) throw new Error("Sara is not connected to the visual session.");
+      setScreenVisionLiveState("capturing");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/cancel|denied|notallowed/i.test(message)) setErrorText(`Camera question failed: ${message}`);
+    } finally {
+      stream?.getTracks().forEach((track) => track.stop());
+    }
+  };
+
+  const [activeEmotion, setActiveEmotion] = useState<SaraEmotion>("idle");
   const [themeColor, setThemeColor] = useState<string>("charcoal");
   const [userCaption, setUserCaption] = useState<string>("");
-  const [characterState, setCharacterState] = useState<"idle" | "thinking" | "talking">("idle");
+  const [liveToolTasks, setLiveToolTasks] = useState<LiveToolTaskProgress[]>([]);
+  const [audioDiagnostics, setAudioDiagnostics] = useState<AudioDiagnostics | null>(null);
+  const [listeningPaused, setListeningPaused] = useState(false);
+  const [speechMuted, setSpeechMuted] = useState(false);
+  const [characterState, setCharacterState] = useState<"idle" | "thinking" | "talking" | "listening" | "speaking">("idle");
   // Which character Sara appears as (built-in or locally imported), and the studio.
   const [activeCharacterId, setActiveCharacterId] = useState<string | undefined>(undefined);
   const [showStudio, setShowStudio] = useState(false);
 
   // Server-side settings (agent, presence, companion, onboarding…) and live runtime events.
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+  useEffect(() => {
+    if (!appSettings?.privacy.screenAutoResume || !appSettings.privacy.screenAwareness || autoResumeAttemptedRef.current || screenStreamRef.current) return;
+    const rememberedSource = window.localStorage.getItem("sara.screen.source.v1");
+    if (!rememberedSource) return;
+    autoResumeAttemptedRef.current = true;
+    void startScreenSharing(rememberedSource, true);
+  }, [appSettings?.privacy.screenAutoResume, appSettings?.privacy.screenAwareness, state]);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const events = useAppEvents();
   const reloadAppSettings = () =>
@@ -325,7 +389,11 @@ export default function App() {
     void reloadAppSettings().then((s) => {
       if (s && !s.onboardingComplete) setShowOnboarding(true);
     });
-    const bridge = (window as unknown as { myraa?: { onOpenStudio?: (cb: () => void) => () => void } }).myraa;
+    const bridgeWindow = window as unknown as {
+      sara?: { onOpenStudio?: (cb: () => void) => () => void };
+      myraa?: { onOpenStudio?: (cb: () => void) => () => void };
+    };
+    const bridge = bridgeWindow.sara ?? bridgeWindow.myraa;
     return bridge?.onOpenStudio?.(() => setShowStudio(true));
   }, []);
   // Realism and cloth settings apply live to the character in this window.
@@ -337,6 +405,7 @@ export default function App() {
   const clothLooseness = appSettings?.physics?.clothLooseness;
   useEffect(() => {
     if (!appSettings) return;
+    window.dispatchEvent(new CustomEvent("sara:app-settings", { detail: appSettings }));
     window.dispatchEvent(new CustomEvent("myraa:app-settings", { detail: appSettings }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clothEnabled, clothLooseness]);
@@ -358,7 +427,7 @@ export default function App() {
     });
   };
 
-  const detectEmotionFromText = (text: string): MyraaEmotion => {
+  const detectEmotionFromText = (text: string): SaraEmotion => {
     const lower = text.toLowerCase();
     if (lower.includes("haha") || lower.includes("lol") || lower.includes("funny") || lower.includes("joke") || lower.includes("hehe") || lower.includes("wink")) return "playful";
     if (lower.includes("happy") || lower.includes("harmony") || lower.includes("glad") || lower.includes("joy") || lower.includes("wonderful") || lower.includes("love") || lower.includes("smile")) return "happy";
@@ -373,6 +442,11 @@ export default function App() {
     return "idle";
   };
   const [modelCaption, setModelCaption] = useState<string>("");
+  useEffect(() => {
+    if (!modelCaption || state === "speaking") return;
+    const timer = window.setTimeout(() => setModelCaption(""), 4500);
+    return () => window.clearTimeout(timer);
+  }, [modelCaption, state]);
   const [textMessage, setTextMessage] = useState<string>("");
   const [showGuide, setShowGuide] = useState<boolean>(false);
   const [errorText, setErrorText] = useState<string | null>(null);
@@ -380,9 +454,10 @@ export default function App() {
   // Myraa recollections database core state
   const [memories, setMemories] = useState<Memory[]>([]);
   const [showMemoryDashboard, setShowMemoryDashboard] = useState<boolean>(false);
+  const [showSystemDashboard, setShowSystemDashboard] = useState<boolean>(false);
 
   // V2: Settings + wake word state
-  const [settings, setSettings] = useState<MyraaSettings>(() => loadSettings());
+  const [settings, setSettings] = useState<SaraSettings>(() => loadSettings());
   const [showSettings, setShowSettings] = useState<boolean>(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
   const openSettings = (section: SettingsSection = "general") => {
@@ -393,14 +468,14 @@ export default function App() {
   useEffect(() => { showSettingsRef.current = showSettings; }, [showSettings]);
 
   // V2: Wake word detector instance (Web Speech API, lives for the app lifetime)
-  const wakeDetectorRef = useRef<MyraaWakeWordDetector | null>(null);
+  const wakeDetectorRef = useRef<SaraWakeWordDetector | null>(null);
   // Ref indirection so the wake-word callback always calls the latest connect
   // handler, regardless of where it's declared in the component body.
   const connectHandlerRef = useRef<() => void>(() => {});
 
   // Initialize wake detector once on mount.
   useEffect(() => {
-    const det = new MyraaWakeWordDetector();
+    const det = new SaraWakeWordDetector();
     wakeDetectorRef.current = det;
     return () => {
       det.stop();
@@ -427,14 +502,27 @@ export default function App() {
   }, [settings.wakeWordEnabled, settings.wakePhrase, settings.sensitivity, state]);
 
   // Handle settings changes: persist to localStorage + update state.
-  const handleSettingsChange = (patch: Partial<MyraaSettings>) => {
+  const handleSettingsChange = (patch: Partial<SaraSettings>) => {
     const next = saveSettings(patch);
     setSettings(next);
   };
 
-  const sessionRef = useRef<MyraaAudioSession | null>(null);
+  const sessionRef = useRef<SaraAudioSession | null>(null);
   // State mirrors the ref so the 3D renderer receives new audio analysers immediately.
-  const [audioSession, setAudioSession] = useState<MyraaAudioSession | null>(null);
+  const [audioSession, setAudioSession] = useState<SaraAudioSession | null>(null);
+
+  useEffect(() => {
+    const update = () => setAudioDiagnostics(sessionRef.current?.getDiagnostics() ?? null);
+    update();
+    const timer = window.setInterval(update, 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  // Keep barge-in preference live while connected; changing it must not drop
+  // the microphone or the current background tasks.
+  useEffect(() => {
+    if (appSettings) sessionRef.current?.setBargeInEnabled(appSettings.voice.bargeIn);
+  }, [appSettings?.voice.bargeIn]);
 
   // Fetch initial recollections from backend database
   useEffect(() => {
@@ -480,21 +568,22 @@ export default function App() {
 
   // Initialize the audio session handlers once on mount
   useEffect(() => {
-    const session = new MyraaAudioSession({
+    const session = new SaraAudioSession({
       onStateChange: (newState) => {
         setState(newState);
         if (newState === "disconnected") {
+          setListeningPaused(false);
           // Reset captions on disconnect
           setUserCaption("");
           setModelCaption("");
           setActiveEmotion("idle");
           setCharacterState("idle");
         } else if (newState === "listening") {
-          // Return to receptive resting state
+          // Keep the companion in a receptive idle pose while the user is speaking.
           setActiveEmotion("idle");
-          setCharacterState("idle");
+          setCharacterState("listening");
         } else if (newState === "speaking") {
-          setCharacterState("talking");
+          setCharacterState("speaking");
         }
       },
       onTranscription: (role, text) => {
@@ -540,6 +629,9 @@ export default function App() {
           setMemories(updatedMemories);
         }
       },
+      onTaskProgress: (task) => {
+        setLiveToolTasks((current) => [...current.filter((item) => item.taskId !== task.taskId), task].slice(-20));
+      },
       onScreenVisionState: (visionState, info) => {
         setScreenVisionLiveState(visionState);
         if (info?.error) {
@@ -551,11 +643,49 @@ export default function App() {
     });
     sessionRef.current = session;
     setAudioSession(session);
+    // Keep the established normal-app launch behavior. A native-host view is
+    // separate from Electron and must not silently open a second microphone
+    // session; its existing visible voice controls still use this same session.
+    const appMode = new URLSearchParams(location.search).get("mode");
+    const hostOwnsVoice = appMode === "native-host" || appMode === "desktop-host-owner";
+    if (!hostOwnsVoice) {
+      void session.connect().catch((error) => {
+        setErrorText(error instanceof Error ? error.message : "Sara could not start the microphone.");
+      });
+    }
 
     return () => {
       session.disconnect();
       if (sessionRef.current === session) sessionRef.current = null;
     };
+  }, []);
+
+  useEffect(() => {
+    const bridgeWindow = window as unknown as {
+      sara?: { onDesktopHostMode?: (callback: (enabled: boolean) => void) => () => void };
+      myraa?: { onDesktopHostMode?: (callback: (enabled: boolean) => void) => () => void };
+    };
+    const bridge = bridgeWindow.sara ?? bridgeWindow.myraa;
+    return bridge?.onDesktopHostMode?.((enabled) => {
+      if (enabled) sessionRef.current?.disconnect();
+    });
+  }, []);
+
+  useEffect(() => {
+    if (new URLSearchParams(location.search).get("mode") !== "native-host") return;
+    const hostWindow = window as unknown as {
+      saraDesktopHost?: { onMessage?: (callback: (message: { type?: string }) => void) => () => void };
+    };
+    return hostWindow.saraDesktopHost?.onMessage?.((message) => {
+      if (message.type === "voice.activate" && stateRef.current === "disconnected") {
+        connectHandlerRef.current();
+      } else if (message.type === "emergency.stop") {
+        void api.emergencyStop().catch((error) => setErrorText(error instanceof Error ? error.message : "Emergency stop request failed."));
+      }
+      if (["host.ready", "monitor.changed", "companion.visibility", "backend.status", "shutdown"].includes(String(message.type))) {
+        window.dispatchEvent(new CustomEvent("sara:native-host", { detail: message }));
+      }
+    });
   }, []);
 
   const handleToggleConnection = async () => {
@@ -656,16 +786,22 @@ export default function App() {
       {/* Decorative grid pattern background */}
       <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.012)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.012)_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none opacity-40" />
 
+      {/* Cinematic command status layer; the existing SARA character remains unchanged. */}
+      <div className="absolute top-6 left-6 z-20 hidden md:block rounded-lg border border-cyan-400/20 bg-slate-950/35 px-3 py-2 font-mono text-[10px] tracking-[0.22em] text-cyan-100/70 backdrop-blur-sm">
+        <div className="flex items-center gap-2"><span className={`h-1.5 w-1.5 rounded-full ${state === "disconnected" ? "bg-rose-400" : state === "connecting" ? "bg-amber-300 animate-pulse" : "bg-cyan-300"}`} />SARA CORE <span className="text-white/30">//</span> {state.toUpperCase()}</div>
+        <div className="mt-1 text-[9px] tracking-[0.14em] text-white/35">VOICE · MEMORY · COMPUTER CONTROL</div>
+      </div>
+
       {/* FULL VIEWPORT HOLOGRAPHIC STAGE: Sara materializes across the entire screen */}
       <div className="absolute inset-0 z-0 pointer-events-auto select-none">
-        <MyraaCoreVisualizer
+        <SaraCoreVisualizer
           session={audioSession}
           state={state}
           themeColor={themeColor}
           activeEmotion={activeEmotion}
           characterState={characterState}
           reflectionStrength={settings.characterShine / 50}
-          characterId={activeCharacterId}
+          characterId={settings.characterAppearance === "spaceship-hologram" ? "sara-spaceship-hologram" : activeCharacterId}
         />
       </div>
 
@@ -702,18 +838,13 @@ export default function App() {
             <span className="hidden sm:inline">RECALLS</span>
           </button>
 
-          <button
-            onClick={() => setShowStudio(true)}
-            className="flex items-center gap-1 opacity-25 hover:opacity-100 text-white transition text-xs font-mono tracking-widest cursor-pointer"
-            title="Character Studio: change character, pose, physics"
-          >
-            <Sparkles size={14} />
-            <span className="hidden sm:inline">CHARACTER</span>
+          <button onClick={() => setShowSystemDashboard(!showSystemDashboard)} className="flex items-center gap-1 opacity-25 hover:opacity-100 text-white transition text-xs font-mono tracking-widest cursor-pointer" title="System evidence dashboard">
+            <Activity size={14} /><span className="hidden sm:inline">SYSTEM</span>
           </button>
 
           {/* Real-time screen sharing toggler button inside Myraa glass style header */}
           <button
-            onClick={isScreenSharing ? stopScreenSharing : startScreenSharing}
+            onClick={isScreenSharing ? stopScreenSharing : openScreenSourcePicker}
             className={`flex items-center gap-1.5 transition text-xs font-mono tracking-widest cursor-pointer ${
               isScreenSharing
                 ? "text-cyan-400 opacity-100 font-semibold"
@@ -903,12 +1034,28 @@ export default function App() {
           <button
             type="submit"
             aria-label="Send message"
-            disabled={!textMessage.trim() || state === "connecting"}
+            disabled={!textMessage.trim()}
             className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-500/15 text-cyan-200 ring-1 ring-cyan-400/30 transition hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-35"
           >
             <Send size={16} />
           </button>
         </form>
+
+        <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[10px] font-mono uppercase tracking-wider text-slate-500" aria-label="Sara service status">
+          <span className={audioDiagnostics?.microphone === "connected" ? "text-emerald-300" : "text-amber-300"}>Mic: {audioDiagnostics?.microphone ?? "starting"}</span>
+          <span className={audioDiagnostics?.voiceConnection === "connected" ? "text-emerald-300" : audioDiagnostics?.voiceConnection === "connecting" ? "text-amber-300" : "text-rose-300"}>Voice: {audioDiagnostics?.voiceConnection ?? "starting"}</span>
+          <span className={audioDiagnostics?.playback === "unavailable" ? "text-rose-300" : "text-slate-400"}>Audio: {audioDiagnostics?.playback ?? "starting"}</span>
+          {Boolean(audioDiagnostics?.reconnectAttempt) && <span className="text-amber-300">Reconnect {audioDiagnostics?.reconnectAttempt}/5</span>}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => { const next = !listeningPaused; setListeningPaused(next); sessionRef.current?.setListeningPaused(next); }} disabled={state === "disconnected"} className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[10px] font-mono uppercase tracking-wider text-slate-300 hover:bg-white/10 disabled:opacity-40" title={listeningPaused ? "Resume microphone" : "Pause microphone"}>
+            {listeningPaused ? <Play size={12} /> : <Pause size={12} />} {listeningPaused ? "Resume listening" : "Pause listening"}
+          </button>
+          <button type="button" onClick={() => { const next = !speechMuted; setSpeechMuted(next); sessionRef.current?.setSpeechMuted(next); }} disabled={state === "disconnected"} className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[10px] font-mono uppercase tracking-wider text-slate-300 hover:bg-white/10 disabled:opacity-40" title={speechMuted ? "Unmute Sara" : "Mute Sara's speech"}>
+            {speechMuted ? <VolumeX size={12} /> : <Volume2 size={12} />} {speechMuted ? "Unmute speech" : "Mute speech"}
+          </button>
+        </div>
 
         {/* Dynamic Minimalist Waveform Visualizer */}
         <div className="flex items-center justify-center gap-1 h-8 w-44">
@@ -977,6 +1124,48 @@ export default function App() {
 
       </footer>
 
+      <AnimatePresence>
+        {showScreenSourcePicker && !isScreenSharing && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[90] flex items-center justify-center bg-black/75 p-4 backdrop-blur-md"
+            role="dialog" aria-modal="true" aria-labelledby="screen-source-title"
+          >
+            <motion.div
+              initial={{ y: 12, scale: 0.98 }} animate={{ y: 0, scale: 1 }} exit={{ y: 8, scale: 0.98 }}
+              className="w-full max-w-xl rounded-2xl border border-cyan-400/20 bg-slate-950/95 p-5 shadow-2xl"
+            >
+              <div className="mb-1 flex items-center gap-2 text-cyan-300">
+                <Monitor size={17} />
+                <h2 id="screen-source-title" className="font-mono text-sm tracking-widest">CHOOSE WHAT SARA CAN SEE</h2>
+              </div>
+              <p className="mb-4 text-xs leading-relaxed text-slate-400">
+                Sharing starts only after you choose a source. Changed frames may be sent to the connected Gemini session for live understanding. Stop or pause sharing at any time.
+              </p>
+              <div className="grid max-h-[55vh] grid-cols-1 gap-2 overflow-y-auto sm:grid-cols-2">
+                {screenSources.map((source) => (
+                  <button
+                    key={source.id}
+                    onClick={() => void startScreenSharing(source.id)}
+                    className="group overflow-hidden rounded-xl border border-white/10 bg-white/[0.03] text-left transition hover:border-cyan-400/50 hover:bg-cyan-400/[0.06]"
+                  >
+                    {source.thumbnail ? (
+                      <img src={source.thumbnail} alt="" className="aspect-video w-full bg-black object-contain" />
+                    ) : (
+                      <div className="flex aspect-video items-center justify-center bg-black/50 text-slate-500"><Monitor size={28} /></div>
+                    )}
+                    <span className="block truncate px-3 py-2 text-xs text-slate-200 group-hover:text-cyan-200">{source.name}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="mt-4 flex justify-end">
+                <button onClick={() => setShowScreenSourcePicker(false)} className="rounded-lg border border-white/10 px-4 py-2 text-xs text-slate-300 hover:bg-white/5">Cancel</button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Dynamic Floating Glassmorphic Screen Sharing Control Hub */}
       <AnimatePresence>
         {isScreenSharing && (
@@ -1009,21 +1198,19 @@ export default function App() {
 
             {/* Smart Video PIP Preview Holder */}
             <div className="relative aspect-video w-full rounded-xl overflow-hidden bg-slate-900 border border-white/5 mb-3 flex items-center justify-center group select-none">
-              <video
-                ref={(el) => {
-                  if (el && screenStreamRef.current && el.srcObject !== screenStreamRef.current) {
-                    el.srcObject = screenStreamRef.current;
-                    el.muted = true;
-                    el.play().catch(err => console.log("Mini preview stream play issue:", err));
-                  }
-                }}
-                className={`w-full h-full object-cover transition-opacity duration-300 ${
-                  isScreenSharingPaused ? "opacity-30 blur-sm" : "opacity-90"
-                }`}
-                autoPlay
-                playsInline
-                muted
-              />
+              {screenPreviewUrl ? (
+                <img
+                  src={screenPreviewUrl}
+                  alt="Current shared screen"
+                  className={`w-full h-full object-cover transition-opacity duration-300 ${
+                    isScreenSharingPaused ? "opacity-30 blur-sm" : "opacity-90"
+                  }`}
+                />
+              ) : (
+                <div className="px-4 text-center text-[10px] font-mono text-slate-400">
+                  Waiting for the first screen capture…
+                </div>
+              )}
 
               {isScreenSharingPaused && (
                 <div className="absolute inset-0 flex items-center justify-center">
@@ -1036,9 +1223,16 @@ export default function App() {
               {!isScreenSharingPaused && screenVisionMode && (
                 <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-0.5 rounded bg-cyan-950/50 border border-cyan-400/20 text-[9px] font-mono text-cyan-300">
                   <span className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-ping" />
-                  <span>Streaming FPS: 0.4</span>
+                  <span>Live capture: up to 1 FPS</span>
                 </div>
               )}
+            </div>
+
+            <div className="mb-2 text-[9px] font-mono text-slate-400" aria-live="polite">
+              Captured {screenMetrics.captured} · sent to Sara {screenMetrics.sent} · unchanged {screenMetrics.skipped} · dropped {screenMetrics.dropped}
+              <span className={`ml-1 ${state === "listening" || state === "speaking" ? "text-emerald-300" : "text-amber-300"}`}>
+                · Gemini {state === "listening" || state === "speaking" ? "connected" : "not connected"}
+              </span>
             </div>
 
             {/* Quick Action Control Strip */}
@@ -1070,6 +1264,15 @@ export default function App() {
               >
                 <RefreshCw size={11} />
                 <span>Switch</span>
+              </button>
+
+              <button
+                onClick={() => void askCameraAboutScene()}
+                className="py-1.5 px-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-xs font-mono text-slate-300 hover:text-white flex items-center justify-center gap-1 transition-all cursor-pointer"
+                title="Ask Sara about one camera frame"
+              >
+                <Camera size={11} />
+                <span>Camera</span>
               </button>
 
               <button
@@ -1114,6 +1317,9 @@ export default function App() {
         onDeleteMemory={handleDeleteMemory}
         themeColor={themeColor}
       />
+      <Suspense fallback={showSystemDashboard ? <div className="absolute inset-y-0 left-0 w-full max-w-lg z-50 bg-[#020206]/95 p-5 text-xs text-slate-400">Loading system dashboard…</div> : null}>
+        <SystemDashboard isOpen={showSystemDashboard} onClose={() => setShowSystemDashboard(false)} />
+      </Suspense>
 
       {/* What Sara is doing on the PC, plus approval requests (always shown). */}
       <TaskHud
@@ -1121,6 +1327,13 @@ export default function App() {
         showHud={appSettings?.autonomy.showTaskHud ?? true}
         emergencyShortcut={appSettings?.autonomy.emergencyShortcut}
       />
+      <LiveToolTaskHud tasks={liveToolTasks} onCancel={(taskId) => {
+        if (!sessionRef.current?.cancelToolTask(taskId)) {
+          setErrorText("Sara could not reach the active voice connection to cancel that operation.");
+          return;
+        }
+        setLiveToolTasks((current) => current.map((task) => task.taskId === taskId ? { ...task, state: "cancelling", message: "Cancellation requested.", at: Date.now() } : task));
+      }} />
 
       {/* V2: Settings sliding core panel */}
       <SettingsPanel

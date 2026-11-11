@@ -29,6 +29,7 @@ import { RecoveryEngine, type RecoveryAdvice } from "./recovery";
 import { resolveReferences, type ResolvedReference } from "./references";
 import type { InputArbiter, ResourceScheduler } from "./scheduler";
 import { TERMINAL_STATES, type TaskSession, type TaskStore } from "./taskSession";
+import { classifyTaskComplexity } from "./taskComplexity";
 
 const log = createLogger("agent.loop");
 
@@ -55,6 +56,7 @@ export interface TaskManagerDeps {
   onEmergencyStop?: (reason: string) => void;
   maxSteps?: number;
   maxDurationMs?: number;
+  stuckActionLimit?: number;
 }
 
 interface Control {
@@ -83,6 +85,10 @@ export class TaskManager {
     this.deps.maxSteps = steps;
   }
 
+  setStuckActionLimit(limit: number): void {
+    this.deps.stuckActionLimit = Math.max(2, Math.min(5, Math.round(limit)));
+  }
+
   get activeTaskId(): string | null {
     return this.running;
   }
@@ -93,6 +99,7 @@ export class TaskManager {
     if (!trimmed) throw new Error("A task goal is required.");
     const sensitive = options.sensitive ?? /(send|bhej|whatsapp|message|mail|delete|hata|install|buy|order|pay|password|account)/i.test(trimmed);
     const session = this.deps.store.create({ goal: trimmed, origin, modelId: this.deps.router.registry.getSelection().brain, sensitive });
+    session.complexity = classifyTaskComplexity(trimmed);
     this.controls.set(session.id, { scope: rootScope.child(`task:${session.id}`), preface: options.preface || [], paused: false, takeover: false, resumeWaiters: [], answer: null });
     this.deps.audit.record(session.id, "task.started", `Request: ${trimmed}`);
     this.deps.working.noteUtterance("user", trimmed);
@@ -291,7 +298,7 @@ export class TaskManager {
     const scope = control.scope;
     const maxSteps = this.deps.maxSteps ?? 30;
     const deadline = Date.now() + (this.deps.maxDurationMs ?? 15 * 60_000);
-    const recovery = new RecoveryEngine();
+    const recovery = new RecoveryEngine(5, this.deps.stuckActionLimit ?? 3);
     const userAnswers: Array<{ question: string; answer: string }> = [];
     const notes: string[] = [...control.preface];
     let plan: string[] | null = null;

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SARA Windows Bridge v1",
+  "type": "object",
+  "required": ["id", "operation", "requestId", "timestamp", "arguments"],
+  "properties": {
+    "id": { "type": "string", "const": "sara.windows.bridge.v1" },
+    "operation": { "type": "string", "enum": ["health", "system_info", "foreground_window", "monitors"] },
+    "requestId": { "type": "string", "minLength": 8, "maxLength": 100 },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "arguments": { "type": "object", "additionalProperties": false }
+  },
+  "additionalProperties": false
+}

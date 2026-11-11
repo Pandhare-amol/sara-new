@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import platform
 import time
+import math
 from typing import List, Any, Dict, Iterable, Tuple
 
 from .registry import ToolError, register
@@ -70,6 +71,26 @@ def _button(value: Any, allowed: Iterable[str] = ("left", "middle", "right")) ->
     if button not in set(allowed):
         raise ToolError(f"Unsupported mouse button: {button}.")
     return button
+
+
+def _move_smooth(gui: Any, start: Tuple[int, int], end: Tuple[int, int], duration: float) -> None:
+    """Move the physical cursor along a short eased curve for visible control."""
+    if duration <= 0.01 or start == end:
+        gui.moveTo(end[0], end[1], duration=0)
+        return
+    distance = math.hypot(end[0] - start[0], end[1] - start[1])
+    points = max(4, min(32, int(distance / 100) + 4))
+    dx, dy = end[0] - start[0], end[1] - start[1]
+    length = max(1.0, math.hypot(dx, dy))
+    bow = min(24.0, distance * 0.04)
+    px, py = -dy / length * bow, dx / length * bow
+    for i in range(1, points + 1):
+        t = i / points
+        eased = t * t * (3.0 - 2.0 * t)
+        curve = math.sin(math.pi * t)
+        x = round(start[0] + dx * eased + px * curve)
+        y = round(start[1] + dy * eased + py * curve)
+        gui.moveTo(x, y, duration=duration / points)
 
 
 def _active_window() -> Dict[str, Any]:
@@ -165,7 +186,9 @@ def _observation(include_windows: bool = False) -> Dict[str, Any]:
 @register("moveMouse")
 def move_mouse(args: Dict[str, Any]) -> Dict[str, Any]:
     x, y = _coordinate(args)
-    _pyautogui().moveTo(x, y, duration=_duration(args.get("duration", 0.2)))
+    gui = _pyautogui()
+    current = gui.position()
+    _move_smooth(gui, (int(current.x), int(current.y)), (x, y), _duration(args.get("duration", 0.2)))
     return {"result": f"Moved cursor to ({x}, {y}).", "observation": _observation()}
 
 

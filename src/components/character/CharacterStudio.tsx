@@ -8,7 +8,7 @@
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Boxes, Hand, Layers, PersonStanding, Wind, ClipboardCheck, X, Upload, Loader2, Star } from 'lucide-react';
-import { MyraaCharacter } from '../../character/MyraaCharacter';
+import { SaraCharacter } from '../../character/SaraCharacter';
 import type { CharacterSystem } from '../../character/core/CharacterSystem';
 import { listAllCharacters, isBuiltInCharacter, type CharacterListing } from '../../character/config/registry';
 import type { CharacterProfile } from '@/shared/character/profile';
@@ -205,12 +205,19 @@ export const CharacterStudio: React.FC<CharacterStudioProps> = ({ initialCharact
   };
 
   const browse = async () => {
-    const bridge = (window as unknown as { myraa?: { pickCharacterSource?: () => Promise<string | null> } }).myraa;
-    if (!bridge?.pickCharacterSource) {
+    const bridgeWindow = window as unknown as {
+      sara?: { pickCharacterSource?: () => Promise<string | null> };
+      myraa?: { pickCharacterSource?: () => Promise<string | null> };
+      saraDesktopHost?: { pickCharacterSource?: () => Promise<string | null> };
+    };
+    const pickCharacterSource = bridgeWindow.sara?.pickCharacterSource
+      ?? bridgeWindow.myraa?.pickCharacterSource
+      ?? bridgeWindow.saraDesktopHost?.pickCharacterSource;
+    if (!pickCharacterSource) {
       setMessage('Paste the full path of a .zip, folder or .pmx file (the file picker is available in the desktop app).');
       return;
     }
-    const picked = await bridge.pickCharacterSource();
+    const picked = await pickCharacterSource();
     if (picked) {
       setImportPath(picked);
       void doImport(picked);
@@ -500,7 +507,7 @@ export const CharacterStudio: React.FC<CharacterStudioProps> = ({ initialCharact
             </div>
           )}
           {characterId && (
-            <MyraaCharacter
+            <SaraCharacter
               clothInteraction={false}
               key={`${characterId}:${reloadKey}`}
               characterId={characterId}

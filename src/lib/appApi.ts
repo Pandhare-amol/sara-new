@@ -1,5 +1,5 @@
 /**
- * Typed client for the runtime REST API (runtime/myraaRuntime.ts) and the
+ * Typed client for the Sara runtime REST API (runtime/saraRuntime.ts) and the
  * `/events` WebSocket. Everything here is renderer-safe: the backend never
  * returns secrets, and nothing in this file sends or stores one except
  * `saveProviderKey`, which posts the key once and keeps no copy.
@@ -125,7 +125,8 @@ export interface AppSettings {
     autoDndMeetings: boolean;
     autoDndRecording: boolean;
   };
-  autonomy: { maxSteps: number; conflictWaitSec: number; emergencyShortcut: string; showTaskHud: boolean };
+  autonomy: { maxSteps: number; conflictWaitSec: number; emergencyShortcut: string; assistantShortcut: string; showTaskHud: boolean; keepRunningInBackground: boolean };
+  humanLike: { observeVerifyActions: boolean; smoothMouseMovement: boolean; naturalTypingPauses: boolean; pauseOnUserInput: boolean; stuckActionLimit: number; conciseProgressUpdates: boolean };
   voice: { voiceName: string; style: "natural" | "anime"; pitch: number; bargeIn: boolean; speakTaskUpdates: "all" | "important" | "none" };
   companion: {
     enabled: boolean;
@@ -140,6 +141,7 @@ export interface AppSettings {
     hideAndPeek: boolean;
     [key: string]: unknown;
   };
+  desktopHost: { enabled: boolean; monitorDevice: string };
   character: { activeCharacterId: string; eyeFollowCursor: boolean; headFollowCursor: boolean; idleVariety: number };
   graphics: { realism: number; quality: "auto" | "potato" | "low" | "balanced" | "high"; autoStep: number };
   physics: {
@@ -155,9 +157,11 @@ export interface AppSettings {
     clothEnabled: boolean;
     clothLooseness: number;
   };
-  privacy: { screenAwareness: boolean; cameraPresence: boolean; clipboardInContext: boolean };
+  privacy: { screenAwareness: boolean; screenAutoResume: boolean; cameraPresence: boolean; clipboardInContext: boolean };
+  security: { faceEnabled: boolean; voiceEnabled: boolean; idleTimeoutMin: number; absoluteTimeoutHours: number; lockOnWindowsLock: boolean };
   performance: { activeFps: number; idleFps: number; sleepFps: number; perceptionPollSec: number };
   developer: { debugView: boolean; physicsDebug: boolean; verboseLogs: boolean };
+  advancedFeatures: { adaptiveTone: boolean; skillAcquisition: boolean; predictiveSuggestions: boolean; deviceSync: boolean; secureVaultRecords: boolean; selfEvolutionProposals: boolean; immersiveAdapters: boolean };
 }
 
 /** Deep-partial patch accepted by POST /api/app-settings. */
@@ -186,7 +190,7 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
   try {
     data = text ? JSON.parse(text) : null;
   } catch {
-    throw new Error("MYRAA backend returned an invalid response.");
+    throw new Error("Sara backend returned an invalid response.");
   }
   if (!res.ok) throw new Error((data as { error?: string } | null)?.error || `Request failed (${res.status}).`);
   return data as T;
@@ -215,6 +219,10 @@ export const api = {
 
   appSettings: () => request<AppSettings>("GET", "/api/app-settings"),
   updateAppSettings: (patch: AppSettingsPatch) => request<AppSettings>("POST", "/api/app-settings", patch),
+  securityStatus: () => request<{ enrolled: boolean; authenticated: boolean; required?: boolean; methods: { pin: boolean; face: false; voice: false; windowsHello: false }; lockedUntil: number | null }>("GET", "/api/security/status"),
+  enrollOwnerPin: (pin: string) => request<unknown>("POST", "/api/security/enroll-pin", { pin }),
+  authenticateOwnerPin: (pin: string) => request<{ ok: boolean; reason?: string; retryAfterMs?: number }>("POST", "/api/security/authenticate", { pin }),
+  lockSara: () => request<unknown>("POST", "/api/security/lock"),
   setDnd: (active: boolean) => request<unknown>("POST", "/api/dnd", { active }),
 
   characters: () => request<CharacterSummary[]>("GET", "/api/characters"),

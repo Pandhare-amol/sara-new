@@ -8,7 +8,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { ArrowLeft, ArrowRight, Check, Loader2, Sparkles, ShieldCheck, Brain, MonitorSmartphone, PartyPopper } from "lucide-react";
 import { api, type AppSettings, type AppSettingsPatch, type ModelCatalogue } from "../lib/appApi";
 import { listAllCharacters, type CharacterListing } from "../character/config/registry";
-import type { MyraaSettings } from "../lib/settingsStore";
+import type { SaraSettings } from "../lib/saraSettingsStore";
 import { PermissionRows, usePermissions } from "./SettingsPanel";
 
 type Step = "welcome" | "character" | "ai" | "safety" | "presence" | "done";
@@ -17,8 +17,8 @@ const STEPS: Step[] = ["welcome", "character", "ai", "safety", "presence", "done
 interface OnboardingProps {
   appSettings: AppSettings;
   onAppSettingsChange: (patch: AppSettingsPatch) => void;
-  settings: MyraaSettings;
-  onChange: (patch: Partial<MyraaSettings>) => void;
+  settings: SaraSettings;
+  onChange: (patch: Partial<SaraSettings>) => void;
   onActiveCharacterChange: (id: string) => void;
   onFinish: () => void;
 }
@@ -44,7 +44,7 @@ function CharacterStep({ active, onPick }: { active: string; onPick: (id: string
   if (!characters.length) {
     return (
       <p className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm leading-relaxed text-slate-300">
-        No character yet. After setup, press <b className="text-white">Import my character</b> and choose an MMD model (.pmx, or a .zip / folder with one) that you're allowed to use. It stays on your PC.
+        No character is selected yet. You can choose or import one later from Character Studio.
       </p>
     );
   }

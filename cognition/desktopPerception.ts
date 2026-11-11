@@ -22,13 +22,23 @@ export interface DesktopSnapshot {
     totalBytes: number;
     percentUsed: number;
   } | null;
+  drives?: Array<{ path: string; filesystem?: string | null; freeBytes: number; totalBytes: number; percentUsed: number }>;
   downloads: DesktopDownloadSnapshot[];
   userIdleSeconds: number;
+  resources?: {
+    supported: boolean;
+    cpuPercent?: number;
+    memory?: { totalBytes: number; availableBytes: number; usedBytes: number; percent: number };
+    processes?: Array<{ pid: number; name: string; memoryBytes: number; cpuPercent?: number; status?: string; userOwned?: boolean }>;
+    battery?: { percent: number; plugged: boolean } | null;
+    gpu?: { supported: boolean; devices?: Array<{ index: number; name: string; utilizationPercent: number; memoryUsedBytes: number; memoryTotalBytes: number; temperatureC?: number | null }> };
+  };
 }
 
 export interface DesktopPerceptionOptions {
   fetchSnapshot: (signal: AbortSignal) => Promise<DesktopSnapshot>;
   emit: (event: CognitiveEventInput) => void | Promise<void>;
+  onSnapshot?: (snapshot: DesktopSnapshot) => void | Promise<void>;
   pollIntervalMs?: number;
 }
 
@@ -40,6 +50,9 @@ export class DesktopPerception {
   private availabilityReported = true;
   private activityState: "active" | "idle" | "away" = "active";
   private diskWasCritical = false;
+  private cpuHighSince = 0;
+  private memoryHighSince = 0;
+  private resourceAlertState = new Set<string>();
 
   constructor(private readonly options: DesktopPerceptionOptions) {}
 
@@ -62,6 +75,7 @@ export class DesktopPerception {
     const timeout = setTimeout(() => controller.abort(), 2_000);
     try {
       const snapshot = await this.options.fetchSnapshot(controller.signal);
+      await this.options.onSnapshot?.(snapshot);
       this.consecutiveFailures = 0;
       if (!this.availabilityReported) {
         this.availabilityReported = true;
@@ -75,6 +89,7 @@ export class DesktopPerception {
       this.previous = snapshot;
       await this.updateActivity(snapshot.userIdleSeconds);
       await this.checkDisk(snapshot);
+      await this.checkResources(snapshot);
     } catch {
       this.consecutiveFailures += 1;
       if (this.consecutiveFailures >= 3 && this.availabilityReported) {
@@ -205,6 +220,24 @@ export class DesktopPerception {
         metadata: { path: snapshot.disk.path, freeBytes: snapshot.disk.freeBytes },
       });
     }
+  }
+
+  private async checkResources(snapshot: DesktopSnapshot): Promise<void> {
+    const resources = snapshot.resources;
+    if (!resources?.supported) return;
+    const now = Date.now();
+    const cpuHigh = (resources.cpuPercent ?? 0) >= 85;
+    const memoryHigh = (resources.memory?.percent ?? 0) >= 85;
+    this.cpuHighSince = cpuHigh ? this.cpuHighSince || now : 0;
+    this.memoryHighSince = memoryHigh ? this.memoryHighSince || now : 0;
+    if (this.cpuHighSince && now - this.cpuHighSince >= 30_000 && !this.resourceAlertState.has("cpu")) {
+      this.resourceAlertState.add("cpu");
+      await this.options.emit({ type: "system.cpu_usage_high", source: "system", importance: 0.78, dedupeKey: "resource-cpu-high", metadata: { cpuPercent: resources.cpuPercent, sustainedMs: now - this.cpuHighSince } });
+    } else if (!cpuHigh) this.resourceAlertState.delete("cpu");
+    if (this.memoryHighSince && now - this.memoryHighSince >= 30_000 && !this.resourceAlertState.has("memory")) {
+      this.resourceAlertState.add("memory");
+      await this.options.emit({ type: "system.memory_usage_high", source: "system", importance: 0.8, dedupeKey: "resource-memory-high", metadata: { memoryPercent: resources.memory?.percent, topProcesses: (resources.processes || []).slice(0, 5) } });
+    } else if (!memoryHigh) this.resourceAlertState.delete("memory");
   }
 }
 

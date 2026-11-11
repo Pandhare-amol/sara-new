@@ -2,7 +2,7 @@
  * Settings — one place for everything Sara can be configured to do.
  *
  * Two stores back this page:
- *  - local renderer settings (src/lib/settingsStore.ts): wake word, mic,
+ *  - local renderer settings (src/lib/saraSettingsStore.ts): wake word, mic,
  *    startup, animations, character shine;
  *  - server settings (/api/app-settings, settings/appSettings.ts) plus the
  *    permission policy (/api/permissions), which the agent enforces.
@@ -14,18 +14,18 @@ import {
   Settings, X, Power, Mic, Cpu, Info, Check, AlertTriangle, Sparkles, KeyRound, Loader2, Brain, ShieldCheck,
   Bell, Eye, MonitorSmartphone, Lock, Wrench,
 } from "lucide-react";
-import type { MyraaSettings } from "../lib/settingsStore";
+import type { SaraSettings } from "../lib/saraSettingsStore";
 import { api, LOCKED_CAPABILITIES, type AppSettings, type AppSettingsPatch, type Decision, type ModelCatalogue, type PermissionsView, type MessageConfirmationMode } from "../lib/appApi";
 import { ModelSelectorPanel } from "./ModelSelector";
 
-export type SettingsSection = "general" | "ai" | "voice" | "agent" | "privacy" | "presence" | "character" | "system" | "about";
+export type SettingsSection = "general" | "ai" | "voice" | "agent" | "privacy" | "presence" | "character" | "system" | "integrations" | "security" | "learning" | "about";
 
 interface SettingsPanelProps {
   isOpen: boolean;
   onClose: () => void;
   /** Local renderer settings (owned by App so wake-word state stays in sync). */
-  settings: MyraaSettings;
-  onChange: (patch: Partial<MyraaSettings>) => void;
+  settings: SaraSettings;
+  onChange: (patch: Partial<SaraSettings>) => void;
   /** Server-side settings (owned by App; null while loading). */
   appSettings: AppSettings | null;
   onAppSettingsChange: (patch: AppSettingsPatch) => void;
@@ -41,9 +41,12 @@ const SECTIONS: { id: SettingsSection; label: string; icon: typeof Power }[] = [
   { id: "voice", label: "Voice", icon: Mic },
   { id: "agent", label: "PC control & safety", icon: ShieldCheck },
   { id: "privacy", label: "Privacy", icon: Lock },
+  { id: "security", label: "Security", icon: ShieldCheck },
+  { id: "learning", label: "SARA Learn", icon: Brain },
   { id: "presence", label: "Presence", icon: Bell },
   { id: "character", label: "Character & companion", icon: Sparkles },
   { id: "system", label: "System", icon: Cpu },
+  { id: "integrations", label: "Integrations", icon: MonitorSmartphone },
   { id: "about", label: "About", icon: Info },
 ];
 
@@ -92,17 +95,17 @@ const Row: React.FC<{ label: string; description?: string; children: ReactNode }
   );
 };
 
-function Switch({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
+function Switch({ checked, onChange, label, disabled = false }: { checked: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }) {
   return (
-    <button type="button" role="switch" aria-checked={checked} aria-label={label} onClick={() => onChange(!checked)}
-      className={`h-5 w-10 rounded-full p-0.5 transition-colors duration-200 cursor-pointer ${checked ? "bg-cyan-500" : "bg-white/10"}`}>
+    <button type="button" role="switch" aria-checked={checked} aria-label={label} aria-disabled={disabled} disabled={disabled} onClick={() => onChange(!checked)}
+      className={`h-5 w-10 rounded-full p-0.5 transition-colors duration-200 ${disabled ? "cursor-not-allowed opacity-40" : "cursor-pointer"} ${checked ? "bg-cyan-500" : "bg-white/10"}`}>
       <div className={`h-4 w-4 transform rounded-full bg-white shadow-md transition duration-200 ${checked ? "translate-x-5" : "translate-x-0"}`} />
     </button>
   );
 }
 
-function ToggleRow({ label, description, checked, onChange }: { label: string; description?: string; checked: boolean; onChange: (v: boolean) => void }) {
-  return <Row label={label} description={description}><Switch checked={checked} onChange={onChange} label={label} /></Row>;
+function ToggleRow({ label, description, checked, onChange, disabled = false }: { label: string; description?: string; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+  return <Row label={label} description={description}><Switch checked={checked} onChange={onChange} label={label} disabled={disabled} /></Row>;
 }
 
 function Choice<T extends string>({ value, options, onChange, label }: { value: T; options: [T, string][]; onChange: (v: T) => void; label: string }) {
@@ -140,6 +143,34 @@ function SliderRow({ label, description, value, min, max, step = 1, unit = "", o
 function Note({ tone = "info", children }: { tone?: "info" | "warn" | "ok"; children: ReactNode }) {
   const styles = tone === "warn" ? "border-amber-400/20 bg-amber-400/5 text-amber-200/90" : tone === "ok" ? "border-emerald-400/20 bg-emerald-400/5 text-emerald-200/90" : "border-cyan-400/10 bg-cyan-400/[0.04] text-slate-300";
   return <div className={`rounded-xl border px-3 py-2 text-[11px] leading-relaxed ${styles}`}>{children}</div>;
+}
+
+function LiveCoreControls() {
+  const [status, setStatus] = useState<{ supported?: boolean; built?: boolean; running?: boolean; behindIcons?: boolean; error?: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const refresh = async () => {
+    try { setStatus(await window.sara?.getLiveCoreSurfaceStatus?.() || { error: "Electron bridge unavailable" }); }
+    catch { setStatus({ error: "Status unavailable" }); }
+  };
+  useEffect(() => { refresh(); }, []);
+  const setSurface = async (enabled: boolean) => {
+    if (busy) return;
+    setBusy(true);
+    try { setStatus(await window.sara?.setLiveCoreSurface?.(enabled) || { error: "Electron bridge unavailable" }); }
+    finally { setBusy(false); }
+  };
+  return <div className="space-y-2 px-4 py-3">
+    <div className="flex items-center justify-between gap-3">
+      <div><div className="text-xs text-slate-100">Desktop surface</div><div className="text-[11px] text-slate-500">Uses the native WebView2 host and keeps the normal Windows desktop recoverable.</div></div>
+      <span className={`rounded-full border px-2 py-0.5 text-[9px] font-mono uppercase ${status?.running ? "border-emerald-400/25 text-emerald-300" : "border-slate-400/20 text-slate-400"}`}>{status?.running ? "RUNNING" : "STOPPED"}</span>
+    </div>
+    <div className="flex flex-wrap gap-2">
+      <button type="button" disabled={busy || !status?.built} onClick={() => void setSurface(!status?.running)} className="rounded border border-cyan-400/30 bg-cyan-400/10 px-3 py-1 text-[10px] font-mono text-cyan-200 disabled:opacity-40">{status?.running ? "STOP DESKTOP SURFACE" : "START DESKTOP SURFACE"}</button>
+      <button type="button" onClick={() => void window.sara?.openLiveCore?.()} className="rounded border border-indigo-400/30 bg-indigo-400/10 px-3 py-1 text-[10px] font-mono text-indigo-200">OPEN CORE WINDOW</button>
+    </div>
+    {!status?.built && <p className="text-[11px] text-amber-300">Native host not built. Run <code>npm run build:live-core-host</code> or <code>npm run app</code>.</p>}
+    {status?.behindIcons === false && <p className="text-[11px] text-slate-500">Behind-icons WorkerW hosting is disabled; this avoids undocumented Explorer changes.</p>}
+  </div>;
 }
 
 // ---- sections that load their own data ----------------------------------------------------
@@ -322,6 +353,22 @@ function AgentSection({ app, patch }: { app: AppSettings; patch: (p: AppSettings
         <Row label="Emergency stop shortcut" description="Stops every task immediately, even when Sara is hidden.">
           <kbd className="rounded-md border border-white/15 bg-black/40 px-2 py-1 font-mono text-[11px] text-slate-200">{app.autonomy.emergencyShortcut.replace(/\+/g, " + ")}</kbd>
         </Row>
+        <Row label="Open SARA shortcut" description="Bring the existing SARA window forward from anywhere in Windows.">
+          <select aria-label="Open SARA shortcut" value={app.autonomy.assistantShortcut} onChange={(event) => patch({ autonomy: { assistantShortcut: event.target.value } })} className="rounded-lg border border-white/10 bg-black/40 px-2 py-1.5 text-[11px] text-white outline-none">
+            <option value="Control+Alt+Space">Ctrl + Alt + Space</option>
+            <option value="Control+Alt+J">Ctrl + Alt + J</option>
+            <option value="Control+Shift+Space">Ctrl + Shift + Space</option>
+          </select>
+        </Row>
+      </Group>
+
+      <Group title="Human-like behavior" hint="These affect presentation and recovery preferences only. Permissions, confirmations, and the emergency stop always remain active.">
+        <ToggleRow label="Observe and verify actions" description="Re-check the desktop after important actions before Sara reports success." checked={app.humanLike.observeVerifyActions} onChange={(v) => patch({ humanLike: { observeVerifyActions: v } })} />
+        <ToggleRow label="Smooth mouse movement" description="Move the real cursor with a visible, eased path instead of teleporting." checked={app.humanLike.smoothMouseMovement} onChange={(v) => patch({ humanLike: { smoothMouseMovement: v } })} />
+        <ToggleRow label="Pause when you take control" description="Pause the active task when Sara detects your mouse or keyboard activity." checked={app.humanLike.pauseOnUserInput} onChange={(v) => patch({ humanLike: { pauseOnUserInput: v } })} />
+        <ToggleRow label="Natural typing pauses" description="Add small typing pauses for readability. Off is faster." checked={app.humanLike.naturalTypingPauses} onChange={(v) => patch({ humanLike: { naturalTypingPauses: v } })} />
+        <SliderRow label="Stuck-action limit" description="After this many identical action/screen failures, Sara changes approach and asks instead of looping." value={app.humanLike.stuckActionLimit} min={2} max={5} onChange={(v) => patch({ humanLike: { stuckActionLimit: v } })} />
+        <ToggleRow label="Concise progress updates" description="Use short updates such as “opening Chrome” and “checking the result.”" checked={app.humanLike.conciseProgressUpdates} onChange={(v) => patch({ humanLike: { conciseProgressUpdates: v } })} />
       </Group>
 
       <Group title="What Sara may do" hint="Allow: does it without asking. Ask: shows an approval window first. Block: never. Risky actions such as installs, purchases and power always ask.">
@@ -343,19 +390,96 @@ function AgentSection({ app, patch }: { app: AppSettings; patch: (p: AppSettings
   );
 }
 
-function PrivacySection() {
+function PrivacySection({ app, patch }: { app: AppSettings | null; patch: (p: AppSettingsPatch) => void }) {
   const { view, error, set } = usePermissions();
   return (
     <div className="space-y-5">
       <Group title="What Sara can sense" hint="Blocking a capability stops the agent from using it at all. Voice still needs the microphone while you talk to Sara.">
         {view ? <PermissionRows view={view} capabilities={PRIVACY_CAPABILITIES} onSet={set} /> : <div className="px-4 py-3">{error ? <span className="text-[11px] text-rose-300">{error}</span> : <Loader2 size={14} className="animate-spin text-slate-400" />}</div>}
       </Group>
+      {app && <Group title="Live screen reading" hint="Auto-resume is available only after you manually choose a source once. The sharing panel remains visible and Stop Sharing ends capture immediately.">
+        <ToggleRow label="Auto-resume approved screen" description="Resume the last selected monitor or window when Sara launches, if screen awareness is allowed." checked={app.privacy.screenAutoResume} onChange={(v) => patch({ privacy: { screenAutoResume: v } })} />
+      </Group>}
       <Note>
         When Sara looks at your screen for a task, the screenshot stays in memory for that step and is sent only to the AI model you chose; it is not saved to disk.
-        Logs are scrubbed of API keys, tokens and passwords. The continuous <b>Share screen</b> mode in the header is separate and only runs while you have it switched on.
+        Logs are scrubbed of API keys, tokens and passwords. Screen reading is visible and user-controlled; auto-resume uses only the previously approved source.
       </Note>
     </div>
   );
+}
+
+function SecuritySection({ app, patch }: { app: AppSettings; patch: (p: AppSettingsPatch) => void }) {
+  const [status, setStatus] = useState<{ enrolled: boolean; authenticated: boolean; required?: boolean; methods: { pin: boolean; face: false; voice: false; windowsHello: false } } | null>(null);
+  const [pin, setPin] = useState("");
+  const [message, setMessage] = useState("");
+  const [authVisual, setAuthVisual] = useState<"idle" | "scanning" | "success" | "error">("idle");
+  useEffect(() => { void api.securityStatus().then(setStatus).catch(() => undefined); }, []);
+  const enroll = async () => { setAuthVisual("scanning"); try { await api.enrollOwnerPin(pin); setPin(""); setMessage("Owner PIN enrolled locally and protected by Windows security."); setAuthVisual("success"); void api.securityStatus().then(setStatus); } catch (e) { setMessage(e instanceof Error ? e.message : "Could not enroll PIN."); setAuthVisual("error"); } };
+  const authenticate = async () => { setAuthVisual("scanning"); try { const result = await api.authenticateOwnerPin(pin); setMessage(result.ok ? "Sara unlocked for this session." : (result.reason || "Authentication failed.")); setAuthVisual(result.ok ? "success" : "error"); setPin(""); void api.securityStatus().then(setStatus); } catch (e) { setMessage(e instanceof Error ? e.message : "Authentication failed."); setAuthVisual("error"); } };
+  const lock = async () => { await fetch("/api/security/lock", { method: "POST" }); setMessage("Sara is locked."); setAuthVisual("idle"); void api.securityStatus().then(setStatus); };
+  const visualLabel = authVisual === "scanning" ? "Checking local credentials…" : authVisual === "success" ? "Authentication ready" : authVisual === "error" ? "Authentication needs attention" : "Secure startup gate";
+  return <div className="space-y-5">
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="relative overflow-hidden rounded-2xl border border-cyan-400/20 bg-[#020914]/80 p-5 shadow-[0_0_40px_rgba(0,190,255,0.08)]">
+      <div className="pointer-events-none absolute -right-12 -top-16 h-44 w-44 rounded-full border border-cyan-300/10" />
+      <div className="pointer-events-none absolute -right-6 -top-10 h-32 w-32 rounded-full border border-blue-300/10" />
+      <div className="relative flex items-center gap-4">
+        <div className="relative flex h-20 w-20 items-center justify-center rounded-full border border-cyan-300/35 bg-cyan-400/5">
+          <motion.div animate={authVisual === "scanning" ? { rotate: 360 } : { rotate: 0 }} transition={authVisual === "scanning" ? { repeat: Infinity, duration: 2, ease: "linear" } : { duration: 0.3 }} className="absolute inset-2 rounded-full border border-dashed border-cyan-300/60" />
+          <motion.div animate={authVisual === "success" ? { scale: [0.8, 1.12, 1] } : { scale: 1 }} className={`flex h-11 w-11 items-center justify-center rounded-full ${authVisual === "success" ? "bg-emerald-400/20 text-emerald-300" : authVisual === "error" ? "bg-rose-400/15 text-rose-300" : "bg-blue-500/20 text-cyan-200"}`}>
+            {authVisual === "success" ? <Check size={22} /> : authVisual === "error" ? <AlertTriangle size={20} /> : <Lock size={20} />}
+          </motion.div>
+        </div>
+        <div className="min-w-0 flex-1"><div className="text-[10px] font-mono uppercase tracking-[0.28em] text-cyan-300/80">SARA SECURE STARTUP</div><div className="mt-1 text-lg font-semibold text-white">{visualLabel}</div><div className="mt-1 text-[11px] leading-5 text-slate-400">Local owner verification gates desktop control after SARA starts. Windows logon itself remains protected by Windows.</div></div>
+      </div>
+      <div className="mt-4 flex items-end gap-1 border-t border-white/5 pt-3" aria-hidden="true">{Array.from({ length: 28 }, (_, i) => <motion.span key={i} animate={authVisual === "scanning" ? { height: [4, 8 + ((i * 7) % 18), 5] } : { height: i % 5 === 0 ? 9 : 4 }} transition={authVisual === "scanning" ? { repeat: Infinity, duration: 0.65 + (i % 4) * 0.08, delay: i * 0.02 } : { duration: 0.2 }} className="w-1 rounded-full bg-gradient-to-t from-blue-500 to-cyan-200" />)}</div>
+    </motion.div>
+    <Note tone={status?.required === false ? "info" : "warn"}>{status?.required === false ? "SARA’s post-login owner gate is temporarily disabled by request. Windows password, PIN, and Windows Hello security are unchanged. The saved SARA authentication setup remains available for re-enabling later." : "Owner authentication is local-only. The PIN is protected by Windows DPAPI and is currently the only factor allowed to unlock desktop-control actions."}</Note>
+    <Group title="Owner authentication" hint={status?.required === false ? "Optional setup only; desktop tools are not currently blocked by this SARA gate." : "Sara stays locked until the enrolled owner authenticates. Desktop tools fail closed while locked."}>
+      <Row label={status?.enrolled ? (status.authenticated ? "Unlocked" : "Locked") : "Not enrolled"} description="High-risk actions still require the existing permission and confirmation gates."><span className="text-[10px] font-mono text-cyan-300">{status?.enrolled ? (status.authenticated ? "ACTIVE SESSION" : "PIN REQUIRED") : "SET PIN"}</span></Row>
+      <Row label="Owner PIN" description="At least 6 digits; avoid predictable sequences."><div className="flex gap-2"><input aria-label="Owner PIN" type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} className="w-28 rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 text-xs text-white" /><button type="button" disabled={pin.length < 6 || authVisual === "scanning"} onClick={() => void (status?.enrolled ? authenticate() : enroll())} className="rounded-lg border border-cyan-400/25 bg-cyan-500/10 px-3 py-1.5 text-[11px] text-cyan-100 disabled:opacity-40">{status?.enrolled ? "Unlock" : "Set up PIN"}</button>{status?.authenticated && <button type="button" onClick={() => void lock()} className="rounded-lg border border-rose-400/20 bg-rose-500/10 px-3 py-1.5 text-[11px] text-rose-200">Lock</button>}</div></Row>
+      <ToggleRow label="Lock on Windows lock/sleep" description="Immediately clears Sara's in-memory session when Windows locks or sleeps." checked={app.security.lockOnWindowsLock} onChange={(v) => patch({ security: { lockOnWindowsLock: v } })} />
+      <ToggleRow label="Face authentication" description="Unavailable: the legacy OpenCV face matcher is not Windows Hello and cannot safely unlock this app." checked={false} onChange={() => undefined} disabled />
+      <ToggleRow label="Voice authentication" description="Unavailable: the legacy MFCC voice matcher can be spoofed and is not accepted as an owner credential." checked={false} onChange={() => undefined} disabled />
+      <SliderRow label="Idle session timeout" value={app.security.idleTimeoutMin} min={1} max={120} unit=" min" onChange={(v) => patch({ security: { idleTimeoutMin: v } })} />
+      <SliderRow label="Absolute session timeout" value={app.security.absoluteTimeoutHours} min={1} max={48} unit=" h" onChange={(v) => patch({ security: { absoluteTimeoutHours: v } })} />
+      {message && <div className="px-4 pb-3 text-[11px] text-cyan-200">{message}</div>}
+    </Group>
+  </div>;
+}
+
+type LearningSessionView = { id: string; topic: string; objective: string; depth: string; status: string; modules: string[]; sources: Array<{ url: string; title: string; review?: string; preview?: string }>; experiments: Array<{ id: string; objective: string; verified: boolean; outcome: string }>; assessment?: { status: string; evidence: string | null }; progress: number };
+function LearningSection() {
+  const [sessions, setSessions] = useState<LearningSessionView[]>([]);
+  const [topic, setTopic] = useState("");
+  const [urls, setUrls] = useState("");
+  const [activeId, setActiveId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const load = async () => { try { const data = await fetch("/api/learn/sessions", { cache: "no-store" }).then((r) => r.json()); setSessions(Array.isArray(data) ? data : []); } catch { setMessage("Learning service is unavailable."); } };
+  useEffect(() => { void load(); }, []);
+  const run = async (url: string, body?: unknown) => { const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) }); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error || "Learning request failed."); return data; };
+  const start = async () => { if (!topic.trim() || busy) return; setBusy(true); setMessage(""); try { const session = await run("/api/learn/sessions", { topic: topic.trim(), depth: "beginner" }); setTopic(""); setActiveId(session.id); setMessage("Learning plan created."); await load(); } catch (e) { setMessage(e instanceof Error ? e.message : "Could not start learning."); } finally { setBusy(false); } };
+  const research = async () => { if (!activeId || busy) return; setBusy(true); try { const links = urls.split(/\s+/).map((x) => x.trim()).filter(Boolean); await run(`/api/learn/sessions/${encodeURIComponent(activeId)}/research`, { urls: links }); setUrls(""); setMessage("Sources fetched. Review each source before saving knowledge."); await load(); } catch (e) { setMessage(e instanceof Error ? e.message : "Research failed."); } finally { setBusy(false); } };
+  const practice = async (session: LearningSessionView, objective: string) => { try { const task = await run(`/api/learn/sessions/${encodeURIComponent(session.id)}/practice`, { objective }); setMessage(`Practice task started (${String(task.taskId).slice(0, 8)}). SARA will record it after task verification.`); } catch (e) { setMessage(e instanceof Error ? e.message : "Could not start practice task."); } };
+  const review = async (sessionId: string, url: string, approved: boolean) => { try { await run(`/api/learn/sessions/${encodeURIComponent(sessionId)}/sources/review`, { url, approved }); setMessage(approved ? "Source saved to knowledge." : "Source rejected."); await load(); } catch (e) { setMessage(e instanceof Error ? e.message : "Source review failed."); } };
+  const active = sessions.find((item) => item.id === activeId) || sessions[0];
+  return <div className="space-y-5">
+    <Note>SARA Learn creates a study path, researches URLs you provide, and asks you to review sources before saving them. A topic being researched does not mean SARA has mastered or tested it.</Note>
+    <Group title="Start self-learning" hint="Enter any subject; broad subjects get a staged path.">
+      <Row label="Topic or skill"><div className="flex gap-2"><input aria-label="Learning topic" value={topic} onChange={(e) => setTopic(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void start()} placeholder="e.g. Excel formulas, Python" className="w-56 rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 text-xs text-white" /><button type="button" disabled={busy || !topic.trim()} onClick={() => void start()} className="rounded-lg border border-cyan-400/25 bg-cyan-500/10 px-3 py-1.5 text-[11px] text-cyan-100 disabled:opacity-40">{busy ? "Working…" : "Start"}</button></div></Row>
+      <Row label="Research sources" description="Paste up to 8 HTTPS documentation/article URLs, separated by spaces. Private/local addresses are blocked."><div className="flex gap-2"><input aria-label="Learning source URLs" value={urls} onChange={(e) => setUrls(e.target.value)} placeholder="https://docs.example/..." className="w-56 rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 text-xs text-white" /><button type="button" disabled={busy || !active} onClick={() => void research()} className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] text-slate-200 disabled:opacity-40">Research</button></div></Row>
+    </Group>
+    {active && <Group title="Study plan" hint={`${active.topic} · ${active.depth} · ${active.status} · ${Math.round(active.progress * 100)}%`}>
+      {active.modules.map((module, index) => <Row key={`${active.id}-${index}`} label={`${index + 1}. ${module}`}><button type="button" onClick={() => void practice(active, module)} className="rounded border border-cyan-400/20 px-2 py-1 text-[10px] text-cyan-200">Practice</button></Row>)}
+      {active.sources.map((source) => <Row key={source.url} label={source.title} description={`${source.url} · ${source.review || "pending review"}${source.preview ? `\n${source.preview}` : ""}`}>
+        {(!source.review || source.review === "pending") ? <div className="flex gap-1"><button type="button" onClick={() => void review(active.id, source.url, true)} className="rounded border border-emerald-400/20 px-2 py-1 text-[10px] text-emerald-200">Save</button><button type="button" onClick={() => void review(active.id, source.url, false)} className="rounded border border-white/10 px-2 py-1 text-[10px] text-slate-300">Skip</button></div> : <span className="text-[10px] text-slate-400">{source.review}</span>}
+      </Row>)}
+      {active.experiments.map((experiment) => <Row key={experiment.id} label={`Practice: ${experiment.objective}`} description={`${experiment.outcome}${experiment.verified ? " · verified" : " · not verified"}`} />)}
+      <Row label="Assessment" description={active.assessment?.evidence || "Not yet assessed. Record a real practice outcome to distinguish researched knowledge from demonstrated skill."}><span className="text-[10px] font-mono text-cyan-300">{active.assessment?.status || "not assessed"}</span></Row>
+    </Group>}
+    {sessions.length > 1 && <Group title="Previous learning sessions">{sessions.slice(1, 8).map((item) => <Row key={item.id} label={item.topic} description={`${item.status} · ${Math.round(item.progress * 100)}%`}><button type="button" onClick={() => setActiveId(item.id)} className="rounded border border-white/10 px-2 py-1 text-[10px] text-slate-200">Open</button></Row>)}</Group>}
+    {message && <p role="status" className="text-[11px] text-cyan-200">{message}</p>}
+  </div>;
 }
 
 function SystemSection({ app, patch, onRestartOnboarding }: { app: AppSettings; patch: (p: AppSettingsPatch) => void; onRestartOnboarding: () => void }) {
@@ -400,14 +524,36 @@ function SystemSection({ app, patch, onRestartOnboarding }: { app: AppSettings; 
 export function SettingsPanel({ isOpen, onClose, settings, onChange, appSettings, onAppSettingsChange, initialSection = "general", onOpenStudio, onRestartOnboarding, themeColor }: SettingsPanelProps) {
   const [section, setSection] = useState<SettingsSection>(initialSection);
   const [mics, setMics] = useState<MediaDeviceInfo[]>([]);
+  const [startupSupported, setStartupSupported] = useState(false);
+  const [startupEnabled, setStartupEnabled] = useState(settings.autoStart);
+  const [startupBusy, setStartupBusy] = useState(false);
+  const [startupMessage, setStartupMessage] = useState("");
+  const [monitorDeviceDraft, setMonitorDeviceDraft] = useState("");
 
   useEffect(() => {
     if (isOpen) setSection(initialSection);
   }, [isOpen, initialSection]);
 
   useEffect(() => {
+    setMonitorDeviceDraft(appSettings?.desktopHost?.monitorDevice ?? "");
+  }, [appSettings?.desktopHost?.monitorDevice]);
+
+  useEffect(() => {
     if (!isOpen || section !== "voice" || !navigator.mediaDevices?.enumerateDevices) return;
     void navigator.mediaDevices.enumerateDevices().then((d) => setMics(d.filter((x) => x.kind === "audioinput"))).catch(() => undefined);
+  }, [isOpen, section]);
+
+  useEffect(() => {
+    if (!isOpen || section !== "general") return;
+    const host = window as unknown as { sara?: { getAutoStartStatus?: () => Promise<{ supported: boolean; enabled: boolean }> }; myraa?: { getAutoStartStatus?: () => Promise<{ supported: boolean; enabled: boolean }> } };
+    const bridge = host.sara ?? host.myraa;
+    void bridge?.getAutoStartStatus?.().then((status) => {
+      setStartupSupported(status.supported);
+      if (status.supported) {
+        setStartupEnabled(status.enabled);
+        if (settings.autoStart !== status.enabled) onChange({ autoStart: status.enabled });
+      }
+    }).catch(() => setStartupSupported(false));
   }, [isOpen, section]);
 
   useEffect(() => {
@@ -463,13 +609,35 @@ export function SettingsPanel({ isOpen, onClose, settings, onChange, appSettings
                 {section === "general" && (
                   <div className="space-y-5">
                     <Group title="Startup & appearance">
-                      <ToggleRow label="Launch at Windows startup" description="Start Sara quietly when you log in." checked={settings.autoStart}
-                        onChange={(v) => {
-                          onChange({ autoStart: v });
-                          void fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ autoStart: v }) }).catch(() => {});
+                      <ToggleRow label="Full-work-area SARA desktop view" description="Show the existing SARA UI across the selected monitor's usable area. Right-click the panel or press Esc to hide it and access desktop icons; normal app windows and the taskbar remain usable. This is not a behind-icons wallpaper." checked={Boolean(app.desktopHost?.enabled)} onChange={(v) => patch({ desktopHost: { enabled: v } })} />
+                      <Row label="Desktop panel monitor" description="Select a Windows display by device name. Leave automatic to use the primary monitor.">
+                        <input aria-label="Desktop panel monitor device" value={monitorDeviceDraft} placeholder="Automatic / primary" maxLength={128} onChange={(event) => setMonitorDeviceDraft(event.target.value)} onBlur={() => { const monitorDevice = monitorDeviceDraft.trim(); if (monitorDevice !== (app.desktopHost?.monitorDevice ?? "")) patch({ desktopHost: { monitorDevice } }); }} className="w-44 rounded-lg border border-white/10 bg-black/40 px-2 py-1.5 text-[11px] text-white outline-none" />
+                      </Row>
+                      <ToggleRow label="Launch at Windows startup" description="Start Sara in the background when you log in. Available in an installed Windows build." checked={startupSupported ? startupEnabled : false} disabled={!startupSupported || startupBusy}
+                        onChange={(enabled) => {
+                          const host = window as unknown as { sara?: { setAutoStart?: (value: boolean) => Promise<{ supported: boolean; enabled: boolean; error?: string }> }; myraa?: { setAutoStart?: (value: boolean) => Promise<{ supported: boolean; enabled: boolean; error?: string }> } };
+                          const bridge = host.sara ?? host.myraa;
+                          setStartupBusy(true);
+                          setStartupMessage("");
+                          void bridge?.setAutoStart?.(enabled).then((status) => {
+                            setStartupSupported(status.supported);
+                            if (!status.supported || status.error) {
+                              setStartupMessage(status.error || "Startup registration is available only in an installed Windows build.");
+                              return;
+                            }
+                            setStartupEnabled(status.enabled);
+                            onChange({ autoStart: status.enabled });
+                          }).catch(() => setStartupMessage("Could not update Windows startup settings.")).finally(() => setStartupBusy(false));
                         }} />
+                      {startupMessage && <p role="status" className="px-4 pb-3 text-[11px] text-amber-300">{startupMessage}</p>}
+                      {app && <ToggleRow label="Keep Sara running when closed" description="Closing the main window hides Sara in the system tray. An active voice session and background tasks continue until you choose Quit Sara from the tray." checked={app.autonomy.keepRunningInBackground} onChange={(v) => patch({ autonomy: { keepRunningInBackground: v } })} />}
                       <ToggleRow label="Animations" description="Motion and transitions in the interface." checked={settings.animations} onChange={(v) => onChange({ animations: v })} />
                     </Group>
+                    {app && <Group title="Futuristic presentation · settings only" hint="These controls affect SARA’s presentation settings without changing the main layout or replacing the anime girl.">
+                      <Row label="Presentation profile" description="Choose the existing cinematic appearance profile used by SARA’s visual runtime."><select aria-label="Futuristic presentation profile" value={settings.characterAppearance} onChange={(e) => onChange({ characterAppearance: e.target.value as SaraSettings["characterAppearance"] })} className="rounded-lg border border-cyan-400/20 bg-black/40 px-2 py-1.5 text-[11px] text-white outline-none"><option value="classic">Classic SARA</option><option value="spaceship-hologram">Cinematic SARA</option></select></Row>
+                      <Row label="Command-center animation budget" description="Use existing graphics controls for animated panels and effects; lower settings help 8 GB systems."><select aria-label="Command center animation budget" value={app.graphics?.quality ?? "auto"} onChange={(e) => patch({ graphics: { quality: e.target.value as AppSettings["graphics"]["quality"] } })} className="rounded-lg border border-cyan-400/20 bg-black/40 px-2 py-1.5 text-[11px] text-white outline-none"><option value="auto">Auto</option><option value="high">High</option><option value="balanced">Balanced</option><option value="low">Low resource</option><option value="potato">Minimal</option></select></Row>
+                      <div className="rounded border border-cyan-400/10 bg-cyan-400/5 p-2 text-[10px] text-slate-400">The main SARA screen remains unchanged. These settings only control the presentation profile and rendering budget.</div>
+                    </Group>}
                     {app && (
                       <Group title="How chatty Sara is">
                         <Row label="Talks on her own" description="Quiet: only answers. Lively: comments and checks in more often.">
@@ -505,6 +673,7 @@ export function SettingsPanel({ isOpen, onClose, settings, onChange, appSettings
                         <Row label="Spoken task updates" description="What Sara says out loud while she works on your PC.">
                           <Choice label="Spoken task updates" value={app.voice.speakTaskUpdates} options={[["all", "Everything"], ["important", "Important"], ["none", "Nothing"]]} onChange={(v) => patch({ voice: { speakTaskUpdates: v } })} />
                         </Row>
+                        <ToggleRow label="Interrupt Sara while she speaks" description="Let your voice stop her current reply and take priority. Uses local voice-activity detection; the microphone stays connected either way." checked={app.voice.bargeIn} onChange={(v) => patch({ voice: { bargeIn: v } })} />
                       </Group>
                     )}
                     <Group title="Wake word & microphone">
@@ -528,7 +697,10 @@ export function SettingsPanel({ isOpen, onClose, settings, onChange, appSettings
 
                 {section === "agent" && app && <AgentSection app={app} patch={patch} />}
 
-                {section === "privacy" && <PrivacySection />}
+                {section === "privacy" && <PrivacySection app={app} patch={patch} />}
+
+                {section === "security" && app && <SecuritySection app={app} patch={patch} />}
+                {section === "learning" && <LearningSection />}
 
                 {section === "presence" && app && (
                   <div className="space-y-5">
@@ -548,6 +720,14 @@ export function SettingsPanel({ isOpen, onClose, settings, onChange, appSettings
                 {section === "character" && (
                   <div className="space-y-5">
                     <Group title="Character">
+                      <Row label="Sara's appearance" description="Choose the classic hologram or the new spaceship hologram videos. This preference is saved on this device.">
+                        <select aria-label="Sara appearance" value={settings.characterAppearance}
+                          onChange={(e) => onChange({ characterAppearance: e.target.value as SaraSettings["characterAppearance"] })}
+                          className="rounded-lg border border-white/10 bg-black/40 px-2 py-1.5 text-[11px] text-white outline-none cursor-pointer">
+                          <option value="classic">Classic hologram</option>
+                          <option value="spaceship-hologram">Spaceship hologram</option>
+                        </select>
+                      </Row>
                       <Row label="Character Studio" description="Change character, import your own models, pose, fingers and hair/cloth physics.">
                         <button type="button" onClick={onOpenStudio} className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] text-slate-200 hover:bg-white/10 cursor-pointer">
                           <Wrench size={12} /> Open
@@ -590,6 +770,7 @@ export function SettingsPanel({ isOpen, onClose, settings, onChange, appSettings
                     {app && (
                       <Group title="Desktop companion" hint="Sara standing on your desktop or taskbar outside this window. Drag her around; right-click for options.">
                         <ToggleRow label="Show on the desktop" checked={app.companion.enabled} onChange={(v) => patch({ companion: { enabled: v } })} />
+                        <ToggleRow label="Passive desktop companion layer" description="Show the existing character companion as a click-through desktop-level overlay. This is not a native Windows wallpaper host and does not include the full SARA controls." checked={Boolean(app.companion.desktopLayer)} onChange={(v) => patch({ companion: { desktopLayer: v } })} />
                         <SliderRow label="Size" value={Math.round(app.companion.scale * 100)} min={40} max={250} step={5} unit="%" onChange={(v) => patch({ companion: { scale: v / 100 } })} />
                         <Row label="In full-screen apps and games" description="What the companion does when something goes full screen.">
                           <select aria-label="Full-screen behaviour" value={app.companion.fullscreenBehavior} onChange={(e) => patch({ companion: { fullscreenBehavior: e.target.value as AppSettings["companion"]["fullscreenBehavior"] } })}
@@ -618,6 +799,35 @@ export function SettingsPanel({ isOpen, onClose, settings, onChange, appSettings
                 )}
 
                 {section === "system" && app && <SystemSection app={app} patch={patch} onRestartOnboarding={onRestartOnboarding} />}
+
+                {section === "integrations" && app && (
+                  <div className="space-y-5">
+                    <Group title="Controlled intelligence" hint="These switches enable local behavior. External accounts remain disconnected until a real connector is configured.">
+                      <ToggleRow label="Adaptive communication style" description="Use explicit user preferences and statements to adjust explanations." checked={app.advancedFeatures.adaptiveTone} onChange={(v) => patch({ advancedFeatures: { adaptiveTone: v } })} />
+                      <ToggleRow label="Predictive suggestions" description="Prepare reversible suggestions from approved task history; never submit or delete automatically." checked={app.advancedFeatures.predictiveSuggestions} onChange={(v) => patch({ advancedFeatures: { predictiveSuggestions: v } })} />
+                      <ToggleRow label="Verified skill learning" description="Allow approved workflows to be saved as reusable skills. Activation remains approval-gated." checked={app.advancedFeatures.skillAcquisition} onChange={(v) => patch({ advancedFeatures: { skillAcquisition: v } })} />
+                    </Group>
+                    <Group title="SARA Live Core" hint="Open the separate core UI without replacing the existing assistant window.">
+                      <LiveCoreControls />
+                      <Row label="Open Live Core" description="Launches the integrated SARA core surface in its own Electron window. The existing assistant remains available.">
+                        <button
+                          type="button"
+                          onClick={() => void window.sara?.openLiveCore?.()}
+                          className="rounded border border-cyan-400/30 bg-cyan-400/10 px-3 py-1 text-[10px] font-mono text-cyan-200 hover:bg-cyan-400/20"
+                        >
+                          OPEN CORE UI
+                        </button>
+                      </Row>
+                    </Group>
+                    <Group title="Account connections" hint="No external account is connected by default. Configure a provider-specific connector before enabling access.">
+                      <Row label="Connector Hub" description="Discover and health-check approved real API connectors. Credentials are still entered per provider and never exposed to the renderer."><button type="button" onClick={() => void fetch("/api/api-hub/sync", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ force: false }) })} className="rounded border border-cyan-400/30 px-2 py-1 text-[10px] font-mono text-cyan-200 hover:bg-cyan-400/10">SYNC CONNECTORS</button></Row>
+                      <Row label="Calendar" description="Read-only schedule access and conflict suggestions. Status: not configured."><span className="text-[10px] font-mono text-amber-300">NOT CONFIGURED</span></Row>
+                      <Row label="Email and chat" description="Communication analysis requires an approved provider connector. Status: not configured."><span className="text-[10px] font-mono text-amber-300">NOT CONFIGURED</span></Row>
+                      <Row label="Shared documents" description="Collaboration requires a supported document API or UI Automation adapter. Status: not configured."><span className="text-[10px] font-mono text-amber-300">NOT CONFIGURED</span></Row>
+                      <Row label="YouTube/media learning" description="Provide a URL or transcript; SARA asks before storing knowledge. This workflow is available now."><span className="text-[10px] font-mono text-emerald-300">APPROVAL REQUIRED</span></Row>
+                    </Group>
+                  </div>
+                )}
 
                 {section === "about" && (
                   <div className="space-y-5">

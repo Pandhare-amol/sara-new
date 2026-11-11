@@ -52,6 +52,37 @@ test("task store enforces transitions and marks live sessions interrupted after 
   assert.equal(restarted.takeRecoverable().length, 0);
 });
 
+test("task store flushes terminal outcomes immediately for crash-safe missions", async () => {
+  const dir = tempDir();
+  const store = new TaskStore({ dataDir: dir });
+  await store.initialize();
+  const session = store.create({ goal: "Create verified report", origin: "text" });
+  store.transition(session.id, "planning");
+  store.transition(session.id, "running");
+  store.update(session.id, (current) => {
+    current.result = { success: true, summary: "Report verified." };
+    current.actions.push({
+      id: "verified-action",
+      step: 1,
+      at: new Date().toISOString(),
+      tool: "createFile",
+      argsSummary: "path=[redacted]",
+      summary: "Created report",
+      status: "ok",
+      durationMs: 12,
+      verification: { passed: true, evidence: "File reopened successfully", method: "deterministic" },
+    });
+  });
+  store.transition(session.id, "completed", "Completed and verified.");
+  await store.flush();
+
+  const restarted = new TaskStore({ dataDir: dir });
+  await restarted.initialize();
+  assert.equal(restarted.get(session.id)?.state, "completed");
+  assert.equal(restarted.get(session.id)?.result?.success, true);
+  assert.equal(restarted.get(session.id)?.actions[0]?.verification?.passed, true);
+});
+
 test("resource scheduler grants exclusive leases in priority order and supports cancellation", async () => {
   const scheduler = new ResourceScheduler();
   const first = await scheduler.acquire("task:a", ["mouse", "keyboard"]);

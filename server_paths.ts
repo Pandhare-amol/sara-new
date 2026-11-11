@@ -18,7 +18,7 @@ import path from "path";
 import { SecretStore } from "./secrets/secretStore";
 
 /** Writable per-user data directory. Falls back to cwd in development. */
-export const DATA_DIR: string = process.env.MYRAA_DATA_DIR || process.cwd();
+export const DATA_DIR: string = process.env.SARA_DATA_DIR || process.env.MYRAA_DATA_DIR || process.cwd();
 
 try {
   fs.mkdirSync(DATA_DIR, { recursive: true });

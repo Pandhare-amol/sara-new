@@ -2,7 +2,7 @@
 """
 PyInstaller spec for the MYRAA Desktop Control Agent.
 
-Produces a self-contained onedir bundle (myraa-agent/myraa-agent.exe) with an
+Produces a self-contained onedir bundle (sara-agent/sara-agent.exe) with an
 embedded Python runtime — the target machine needs no Python installed.
 
 Notes:
@@ -149,7 +149,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="myraa-agent",
+    name="sara-agent",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -169,5 +169,5 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name="myraa-agent",
+    name="sara-agent",
 )
