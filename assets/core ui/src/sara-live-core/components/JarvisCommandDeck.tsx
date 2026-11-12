@@ -30,6 +30,7 @@ import {
   RefreshCw,
   RotateCcw,
   Send,
+  Settings,
   Shield,
   ShieldAlert,
   Sparkles,
@@ -44,6 +45,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { PerformanceQuality, SaraCoreState } from '../types';
+import { SaraAudioSession, type LiveState } from '../../../../../src/lib/saraAudio';
 
 export type DeckTabId =
   | 'command'
@@ -169,7 +171,9 @@ export interface JarvisCommandDeckProps {
   onPulseWave: () => void;
   onSetQualityForPowerReroute: (quality: PerformanceQuality) => void;
   onOpenVisualSettings: () => void;
+  onOpenSaraSettings?: () => void;
   onSwitchToExistingShell?: () => void;
+  onSwitchSurface?: (mode: 'companion' | 'live_core' | 'ultron' | 'sara_os' | 'central_os') => void;
   externalActionNonce?: { action: string; nonce: number } | null;
 }
 
@@ -179,10 +183,10 @@ const TABS: Array<{
   icon: React.ComponentType<{ className?: string }>;
 }> = [
   { id: 'command', label: 'J.A.R.V.I.S.', icon: Bot },
-  { id: 'tasks', label: 'Tasks & Ops', icon: Terminal },
-  { id: 'workshop', label: 'Workshop', icon: FlaskConical },
+  { id: 'tasks', label: 'Tasks & Agency', icon: Terminal },
+  { id: 'workshop', label: 'Sim & Blueprint', icon: FlaskConical },
   { id: 'protocols', label: 'Protocols', icon: Workflow },
-  { id: 'ultron', label: 'Ultron', icon: Shield },
+  { id: 'ultron', label: 'Defense & Swarm', icon: Shield },
 ];
 
 export const JarvisCommandDeck: React.FC<JarvisCommandDeckProps> = ({
@@ -194,14 +198,21 @@ export const JarvisCommandDeck: React.FC<JarvisCommandDeckProps> = ({
   onPulseWave,
   onSetQualityForPowerReroute,
   onOpenVisualSettings,
+  onOpenSaraSettings,
   onSwitchToExistingShell,
+  onSwitchSurface,
   externalActionNonce,
 }) => {
   // Window state (native Electron or browser fullscreen fallback)
   const [isMaximized, setIsMaximized] = useState(false);
   const [isAlwaysOnTop, setIsAlwaysOnTop] = useState(false);
 
-  // J.A.R.V.I.S. Voice & Tone State
+  // SARA Real Gemini Live Voice Session + Tone State
+  const [liveState, setLiveState] = useState<LiveState>('disconnected');
+  const [liveMicPaused, setLiveMicPaused] = useState(false);
+  const [liveCaption, setLiveCaption] = useState<string>('');
+  const liveSessionRef = useRef<SaraAudioSession | null>(null);
+
   const [ttsEnabled, setTtsEnabled] = useState(true);
   const [voiceStyle, setVoiceStyle] = useState<'jarvis' | 'natural' | 'anime'>('jarvis');
   const [voiceName, setVoiceName] = useState('Charon');
@@ -214,8 +225,8 @@ export const JarvisCommandDeck: React.FC<JarvisCommandDeckProps> = ({
     {
       id: 'boot-1',
       role: 'jarvis',
-      text: 'J.A.R.V.I.S. Core Command Application online, Boss. Digital Twin Simulator, Blueprint Scanner, Ghost Canary Tripwires, Task Orchestrator, and Project Ultron are standing by.',
-      intent: 'boot',
+      text: 'SARA Live Core online. Real-time Gemini Live Voice, autonomous desktop execution, Digital-Twin simulation, blueprint scanner, and sentinel defense are ready.',
+      intent: 'ready',
       at: Date.now(),
     },
   ]);
@@ -389,7 +400,94 @@ export const JarvisCommandDeck: React.FC<JarvisCommandDeckProps> = ({
     return () => window.clearInterval(id);
   }, [refreshAllData]);
 
-  // Execute unified J.A.R.V.I.S. command
+  // Initialize SARA's real Gemini Live Voice session (`SaraAudioSession`)
+  useEffect(() => {
+    const session = new SaraAudioSession({
+      onStateChange: (st) => {
+        setLiveState(st);
+        if (st === 'disconnected') {
+          setLiveMicPaused(false);
+          setLiveCaption('');
+          onSetCoreState('idle', 0);
+        } else if (st === 'connecting') {
+          onSetCoreState('thinking', 0.3);
+        } else if (st === 'listening') {
+          onSetCoreState('listening', 0.45);
+        } else if (st === 'speaking') {
+          onSetCoreState('speaking', 0.78);
+          onPulseWave();
+        }
+      },
+      onTranscription: (role, text) => {
+        if (!text.trim()) return;
+        setLiveCaption(`${role === 'user' ? 'You' : 'SARA'}: ${text}`);
+        if (role === 'model') {
+          setTranscript((prev) => {
+            const last = prev[prev.length - 1];
+            if (last && last.intent === 'live_voice' && Date.now() - last.at < 3500) {
+              return [
+                ...prev.slice(0, -1),
+                { ...last, text: `${last.text}${text}`, at: Date.now() },
+              ];
+            }
+            return [
+              ...prev.slice(-24),
+              { id: `${Date.now()}-lv`, role: 'jarvis', text, intent: 'live_voice', at: Date.now() },
+            ];
+          });
+        } else if (role === 'user') {
+          setTranscript((prev) => [
+            ...prev.slice(-24),
+            { id: `${Date.now()}-lu`, role: 'boss', text, intent: 'voice', at: Date.now() },
+          ]);
+        }
+      },
+      onToolCall: (_name, _args, cb) => {
+        cb({ result: 'Handled by SARA Live Core.' });
+      },
+      onError: (err) => {
+        setTranscript((prev) => [
+          ...prev.slice(-24),
+          { id: `${Date.now()}-err`, role: 'jarvis', text: `Voice notice: ${err}`, intent: 'voice', at: Date.now() },
+        ]);
+      },
+    });
+    liveSessionRef.current = session;
+    return () => {
+      session.disconnect();
+      liveSessionRef.current = null;
+    };
+  }, [onSetCoreState, onPulseWave]);
+
+  useEffect(() => {
+    liveSessionRef.current?.setSpeechMuted(!ttsEnabled);
+  }, [ttsEnabled]);
+
+  const toggleLiveVoiceSession = useCallback(async () => {
+    const session = liveSessionRef.current;
+    if (!session) return;
+    if (liveState !== 'disconnected') {
+      session.disconnect();
+      return;
+    }
+    try {
+      await session.connect(true);
+    } catch (err) {
+      appendJarvisReply(
+        err instanceof Error ? err.message : 'Could not connect SARA Live Voice.',
+        'voice',
+        false
+      );
+    }
+  }, [liveState, appendJarvisReply]);
+
+  const toggleLiveMicPause = useCallback(() => {
+    const next = !liveMicPaused;
+    setLiveMicPaused(next);
+    liveSessionRef.current?.setListeningPaused(next);
+  }, [liveMicPaused]);
+
+  // Execute unified SARA command (routes to Gemini Live stream when active + /api/jarvis/command)
   const submitJarvisCommand = useCallback(
     async (overrideText?: string) => {
       const text = (overrideText ?? commandInput).trim();
@@ -400,7 +498,18 @@ export const JarvisCommandDeck: React.FC<JarvisCommandDeckProps> = ({
         ...prev.slice(-24),
         { id: `${Date.now()}-u`, role: 'boss', text, at: Date.now() },
       ]);
-      setBusyLabel('Processing J.A.R.V.I.S. directive...');
+
+      // If Gemini Live Voice session is active and this is general conversation, send over Live stream too
+      if (
+        liveState !== 'disconnected' &&
+        liveSessionRef.current &&
+        !/^(task:|mission:|cmd:|ps:|shell:|run a simulation|blueprint|deploy canary|verify canar|optimize)/i.test(text)
+      ) {
+        liveSessionRef.current.sendText(text);
+        return;
+      }
+
+      setBusyLabel('SARA is processing directive...');
       onSetCoreState('thinking');
 
       try {
@@ -417,75 +526,35 @@ export const JarvisCommandDeck: React.FC<JarvisCommandDeckProps> = ({
         }
         onPulseWave();
         appendJarvisReply(
-          data.reply || 'Directive completed, Boss.',
-          data.intent
+          data.reply || 'Directive completed.',
+          data.intent,
+          liveState === 'disconnected'
         );
         if (data.intent === 'simulation' && data.data) setLatestSim(data.data);
         if (data.intent === 'blueprint' && data.data) setLatestBlueprint(data.data);
+        if (data.surfaceMode && data.surfaceMode !== 'live_core' && onSwitchSurface) {
+          onSwitchSurface(data.surfaceMode);
+          return;
+        }
         void refreshAllData();
       } catch (err) {
         appendJarvisReply(
           err instanceof Error ? err.message : 'Unable to reach SARA runtime.',
-          'error'
+          'error',
+          false
         );
         onSetCoreState('idle');
       } finally {
         setBusyLabel(null);
       }
     },
-    [commandInput, onSetCoreState, onPulseWave, appendJarvisReply, refreshAllData]
+    [commandInput, liveState, onSetCoreState, onPulseWave, appendJarvisReply, refreshAllData, onSwitchSurface]
   );
 
-  // Voice Dictation (Web Speech API)
+  // Voice button: connects/toggles real Gemini Live Voice (`SaraAudioSession`) so it works in Electron & Chrome!
   const toggleVoiceDictation = useCallback(() => {
-    const SpeechRec =
-      (window as unknown as { SpeechRecognition?: new () => any; webkitSpeechRecognition?: new () => any })
-        .SpeechRecognition ||
-      (window as unknown as { webkitSpeechRecognition?: new () => any })
-        .webkitSpeechRecognition;
-    if (!SpeechRec) {
-      appendJarvisReply(
-        'Browser speech recognition is unavailable in this environment, Boss — type any directive below and I will execute it immediately.',
-        'voice',
-        false
-      );
-      commandInputRef.current?.focus();
-      return;
-    }
-    if (dictating) {
-      setDictating(false);
-      onSetCoreState('idle');
-      return;
-    }
-    try {
-      const rec = new SpeechRec();
-      rec.lang = 'en-US';
-      rec.interimResults = false;
-      rec.maxAlternatives = 1;
-      setDictating(true);
-      onSetCoreState('listening', 0.55);
-      rec.onresult = (ev: any) => {
-        const transcriptText = String(ev.results?.[0]?.[0]?.transcript || '').trim();
-        setDictating(false);
-        if (transcriptText) {
-          void submitJarvisCommand(transcriptText);
-        } else {
-          onSetCoreState('idle');
-        }
-      };
-      rec.onerror = () => {
-        setDictating(false);
-        onSetCoreState('idle');
-      };
-      rec.onend = () => {
-        setDictating(false);
-      };
-      rec.start();
-    } catch {
-      setDictating(false);
-      onSetCoreState('idle');
-    }
-  }, [dictating, onSetCoreState, submitJarvisCommand, appendJarvisReply]);
+    void toggleLiveVoiceSession();
+  }, [toggleLiveVoiceSession]);
 
   // Apply Voice Tone Preset to SARA Backend
   const updateBackendVoiceTone = async (nextStyle: 'jarvis' | 'natural' | 'anime') => {
@@ -1147,7 +1216,7 @@ export const JarvisCommandDeck: React.FC<JarvisCommandDeckProps> = ({
         style={dragStyle}
         className="pointer-events-auto fixed top-0 right-0 left-0 z-30 flex h-9 items-center justify-between border-b border-cyan-400/20 bg-[#040914]/92 pl-3 text-slate-200 backdrop-blur-xl"
       >
-        {/* Left: Windows App Icon + Title + J.A.R.V.I.S. Voice Badge */}
+        {/* Left: App Icon + SARA Title + Live Voice Status Badge */}
         <div className="flex items-center gap-2.5">
           <span className="flex h-4 w-4 items-center justify-center rounded-full border border-cyan-400/60 bg-cyan-500/20">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-300" />
@@ -1156,7 +1225,9 @@ export const JarvisCommandDeck: React.FC<JarvisCommandDeckProps> = ({
             SARA // J.A.R.V.I.S. CORE
           </span>
           <span className="hidden rounded border border-cyan-400/30 bg-cyan-500/10 px-1.5 py-0.5 font-mono text-[9px] text-cyan-200 md:inline-block">
-            {voiceName.toUpperCase()} • {voiceStyle.toUpperCase()} TONE
+            {liveState !== 'disconnected'
+              ? `LIVE VOICE: ${liveState.toUpperCase()}`
+              : `${voiceName.toUpperCase()} • ${voiceStyle === 'jarvis' ? 'EXECUTIVE' : voiceStyle.toUpperCase()}`}
           </span>
           {fatigue?.auxiliaryPowerReroute && (
             <span className="hidden rounded border border-amber-400/40 bg-amber-500/15 px-1.5 py-0.5 font-mono text-[9px] text-amber-200 lg:inline-block">
@@ -1225,15 +1296,51 @@ export const JarvisCommandDeck: React.FC<JarvisCommandDeckProps> = ({
             )}
           </button>
 
+          {onOpenSaraSettings && (
+            <button
+              type="button"
+              onClick={onOpenSaraSettings}
+              title="Open SARA Global Settings"
+              className="mr-1.5 flex h-6 items-center gap-1 rounded border border-white/15 bg-white/5 px-2 text-[10px] font-medium text-slate-200 hover:bg-white/15 cursor-pointer"
+            >
+              <Settings className="h-3 w-3" />
+              <span className="hidden xl:inline">Settings</span>
+            </button>
+          )}
+
+          {onSwitchSurface && (
+            <button
+              type="button"
+              onClick={() => onSwitchSurface('ultron')}
+              title="Activate ULTRON Mode & Separate Ultron UI"
+              className="mr-1.5 flex h-6 items-center gap-1 rounded border border-red-500/45 bg-red-600/20 px-2 text-[10px] font-semibold text-red-200 hover:bg-red-600/35 cursor-pointer"
+            >
+              <Shield className="h-3 w-3" />
+              <span className="hidden lg:inline">ULTRON</span>
+            </button>
+          )}
+
+          {onSwitchSurface && (
+            <button
+              type="button"
+              onClick={() => onSwitchSurface('sara_os')}
+              title="Switch to SARA Spatial 2050 UI"
+              className="mr-1.5 flex h-6 items-center gap-1 rounded border border-purple-400/30 bg-purple-500/15 px-2 text-[10px] font-medium text-purple-200 hover:bg-purple-500/25 cursor-pointer"
+            >
+              <Sparkles className="h-3 w-3" />
+              <span className="hidden xl:inline">Spatial</span>
+            </button>
+          )}
+
           {onSwitchToExistingShell && (
             <button
               type="button"
               onClick={onSwitchToExistingShell}
-              title="Switch back to Classic SARA UI"
+              title="Turn Off J.A.R.V.I.S. & Return to SARA UI"
               className="mr-1.5 flex h-6 items-center gap-1 rounded border border-cyan-400/30 bg-cyan-500/10 px-2 text-[10px] font-medium text-cyan-200 hover:bg-cyan-500/25 cursor-pointer"
             >
               <ArrowLeftRight className="h-3 w-3" />
-              <span className="hidden lg:inline">Classic UI</span>
+              <span className="hidden lg:inline">SARA UI</span>
             </button>
           )}
 
@@ -1320,23 +1427,71 @@ export const JarvisCommandDeck: React.FC<JarvisCommandDeckProps> = ({
 
           {/* Scrollable Body */}
           <div className="sara-scrollbar flex-1 space-y-3.5 overflow-y-auto p-4 text-xs text-slate-200">
-            {/* ==================== TAB 1: J.A.R.V.I.S. COMMAND & VOICE ==================== */}
+            {/* ==================== TAB 1: SARA LIVE VOICE & COMMAND ==================== */}
             {activeTab === 'command' && (
               <>
+                {/* Real Gemini Live Voice Connection Card */}
+                <div className="rounded-xl border border-cyan-400/30 bg-cyan-950/25 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <div className="font-mono text-[10px] font-bold tracking-wider text-cyan-200 uppercase">
+                        SARA Gemini Live Voice
+                      </div>
+                      <div className="mt-0.5 text-[10px] text-slate-300">
+                        {liveState === 'disconnected'
+                          ? 'Click Connect to talk to SARA in real time'
+                          : liveState === 'connecting'
+                          ? 'Connecting bidirectional audio stream…'
+                          : liveMicPaused
+                          ? 'Connected • Microphone paused'
+                          : `Connected • ${liveState === 'speaking' ? 'SARA Speaking' : 'Listening'}`}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {liveState !== 'disconnected' && (
+                        <button
+                          type="button"
+                          onClick={toggleLiveMicPause}
+                          className="rounded-lg border border-white/15 bg-white/10 px-2.5 py-1.5 text-[10px] font-semibold text-white hover:bg-white/20 cursor-pointer"
+                        >
+                          {liveMicPaused ? 'Resume Mic' : 'Pause Mic'}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => void toggleLiveVoiceSession()}
+                        className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[11px] font-semibold transition cursor-pointer ${
+                          liveState !== 'disconnected'
+                            ? 'border-rose-400/60 bg-rose-500/25 text-rose-100 hover:bg-rose-500/35'
+                            : 'border-cyan-400/60 bg-cyan-500/25 text-cyan-100 hover:bg-cyan-500/35'
+                        }`}
+                      >
+                        <Power className="h-3.5 w-3.5" />
+                        <span>{liveState !== 'disconnected' ? 'Disconnect' : 'Connect Voice'}</span>
+                      </button>
+                    </div>
+                  </div>
+                  {liveCaption && (
+                    <div className="mt-2 truncate rounded-lg bg-black/40 px-2.5 py-1.5 text-[11px] text-cyan-100">
+                      {liveCaption}
+                    </div>
+                  )}
+                </div>
+
                 {/* Voice Cadence & Tone Control */}
                 <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
                   <div className="mb-2 flex items-center justify-between">
                     <span className="font-mono text-[10px] tracking-wider text-slate-400 uppercase">
-                      Voice Cadence & Tone
+                      SARA Voice Cadence & Tone
                     </span>
                     <span className="font-mono text-[10px] text-cyan-300">
-                      {voiceName} ({voiceStyle})
+                      {voiceName} ({voiceStyle === 'jarvis' ? 'executive' : voiceStyle})
                     </span>
                   </div>
                   <div className="grid grid-cols-3 gap-1.5">
                     {(
                       [
-                        ['jarvis', 'J.A.R.V.I.S.'],
+                        ['jarvis', 'Executive'],
                         ['natural', 'Natural'],
                         ['anime', 'Anime'],
                       ] as const
@@ -1393,16 +1548,16 @@ export const JarvisCommandDeck: React.FC<JarvisCommandDeckProps> = ({
                   </button>
                 </div>
 
-                {/* Live J.A.R.V.I.S. Dialogue Stream */}
+                {/* Live SARA Dialogue Stream */}
                 <div className="space-y-2 rounded-xl border border-white/10 bg-black/40 p-3">
                   <div className="flex items-center justify-between text-[10px] text-slate-400">
-                    <span className="font-mono uppercase">J.A.R.V.I.S. Telemetry Log</span>
+                    <span className="font-mono uppercase">SARA Dialogue & Telemetry</span>
                     <button
                       type="button"
                       onClick={onOpenVisualSettings}
                       className="text-cyan-300 hover:underline cursor-pointer"
                     >
-                      Core Visuals
+                      3D Core Visuals
                     </button>
                   </div>
                   <div className="sara-scrollbar max-h-56 space-y-2 overflow-y-auto pr-1">
@@ -1416,7 +1571,7 @@ export const JarvisCommandDeck: React.FC<JarvisCommandDeckProps> = ({
                         }`}
                       >
                         <div className="mb-0.5 font-mono text-[9px] tracking-wider text-slate-400 uppercase">
-                          {item.role === 'boss' ? 'Boss' : 'J.A.R.V.I.S.'}
+                          {item.role === 'boss' ? 'You' : 'SARA'}
                           {item.intent ? ` • ${item.intent}` : ''}
                         </div>
                         <div>{item.text}</div>
@@ -1436,14 +1591,14 @@ export const JarvisCommandDeck: React.FC<JarvisCommandDeckProps> = ({
                   <button
                     type="button"
                     onClick={toggleVoiceDictation}
-                    title="Dictate Voice Directive to J.A.R.V.I.S."
+                    title={liveState !== 'disconnected' ? 'Disconnect SARA Live Voice' : 'Connect SARA Live Voice'}
                     className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition cursor-pointer ${
-                      dictating
-                        ? 'border-rose-400 bg-rose-500/25 text-rose-200 animate-pulse'
+                      liveState !== 'disconnected' || dictating
+                        ? 'border-emerald-400 bg-emerald-500/25 text-emerald-200 animate-pulse'
                         : 'border-white/15 bg-white/5 text-slate-300 hover:bg-white/10'
                     }`}
                   >
-                    {dictating ? (
+                    {liveState !== 'disconnected' || dictating ? (
                       <Mic className="h-4 w-4" />
                     ) : (
                       <MicOff className="h-4 w-4" />
@@ -1454,12 +1609,12 @@ export const JarvisCommandDeck: React.FC<JarvisCommandDeckProps> = ({
                     type="text"
                     value={commandInput}
                     onChange={(e) => setCommandInput(e.target.value)}
-                    placeholder="Direct J.A.R.V.I.S. (e.g. 'run a simulation', 'task: open calculator')..."
+                    placeholder="Ask or command SARA (e.g. 'run a simulation', 'task: open calculator')..."
                     className="h-9 flex-1 rounded-lg border border-white/15 bg-black/50 px-3 text-xs text-white outline-none focus:border-cyan-400/60"
                   />
                   <button
                     type="submit"
-                    aria-label="Send J.A.R.V.I.S. command"
+                    aria-label="Send SARA command"
                     className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-cyan-400/50 bg-cyan-500/25 text-cyan-100 hover:bg-cyan-500/35 cursor-pointer"
                   >
                     <Send className="h-3.5 w-3.5" />
@@ -1779,11 +1934,11 @@ export const JarvisCommandDeck: React.FC<JarvisCommandDeckProps> = ({
                   )}
                 </div>
 
-                {/* 2. Stark Blueprint & Forensic Reconstruction */}
+                {/* 2. Blueprint & Architecture Forensics */}
                 <div className="space-y-2 rounded-xl border border-white/10 bg-white/[0.03] p-3">
                   <div className="flex items-center justify-between">
                     <span className="font-mono text-[10px] font-bold text-slate-200 uppercase">
-                      2. Stark Blueprint & Forensics
+                      2. Architecture Blueprint & Forensics
                     </span>
                     <button
                       type="button"
@@ -1913,7 +2068,7 @@ export const JarvisCommandDeck: React.FC<JarvisCommandDeckProps> = ({
               <>
                 <div className="space-y-1.5 rounded-xl border border-white/10 bg-white/[0.03] p-3">
                   <div className="font-mono text-[10px] font-bold text-cyan-200 uppercase">
-                    Named J.A.R.V.I.S. Protocols
+                    SARA Operational Protocols
                   </div>
                   <div className="space-y-1.5">
                     {protocols.map((p) => (
@@ -2026,13 +2181,13 @@ export const JarvisCommandDeck: React.FC<JarvisCommandDeckProps> = ({
               </>
             )}
 
-            {/* ==================== TAB 5: PROJECT ULTRON ==================== */}
+            {/* ==================== TAB 5: SARA SENTINEL DEFENSE & SWARM ==================== */}
             {activeTab === 'ultron' && (
               <>
                 <div className="space-y-2 rounded-xl border border-rose-500/30 bg-rose-950/15 p-3">
                   <div className="flex items-center justify-between">
                     <span className="font-mono text-[10px] font-bold text-rose-200 uppercase">
-                      Project Ultron Stance
+                      SARA Sentinel Defense Stance
                     </span>
                     <span className="rounded bg-rose-500/20 px-2 py-0.5 font-mono text-[9px] text-rose-200 uppercase">
                       {ultronStance} • {ultronThreat}
@@ -2085,10 +2240,10 @@ export const JarvisCommandDeck: React.FC<JarvisCommandDeckProps> = ({
                   </button>
                 </div>
 
-                {/* Iron Legion Swarm */}
+                {/* Parallel Sub-Agent Swarm */}
                 <div className="space-y-2 rounded-xl border border-white/10 bg-white/[0.03] p-3">
                   <div className="font-mono text-[10px] font-bold text-slate-200 uppercase">
-                    Iron Legion Multi-Sentry Swarm
+                    SARA Parallel Sub-Agent Swarm
                   </div>
                   <input
                     type="text"
@@ -2101,7 +2256,7 @@ export const JarvisCommandDeck: React.FC<JarvisCommandDeckProps> = ({
                     onClick={() => void handleDeployLegion()}
                     className="w-full rounded-lg border border-cyan-400/45 bg-cyan-500/20 py-1.5 text-[11px] font-semibold text-cyan-100 hover:bg-cyan-500/30 cursor-pointer"
                   >
-                    Deploy 4-Sentry Legion Swarm
+                    Deploy 4-Agent Parallel Swarm
                   </button>
                   {legionSummary && (
                     <p className="rounded bg-black/45 p-2 text-[10px] text-slate-300">

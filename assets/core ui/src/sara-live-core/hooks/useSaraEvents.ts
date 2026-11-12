@@ -95,8 +95,8 @@ function readBrowserTelemetry(
     prev.bridgeStatus !== 'disconnected' && prev.activeApp
       ? prev.activeApp
       : document.hasFocus()
-      ? 'SARA J.A.R.V.I.S. Core App (Active)'
-      : 'SARA J.A.R.V.I.S. Core App (Background)';
+      ? 'SARA Live Core (Active)'
+      : 'SARA Live Core (Background)';
 
   return {
     ...prev,
@@ -387,7 +387,7 @@ export function useSaraEvents(
             ? `Executing: ${String(runningTask.goal || '').slice(0, 40)}`
             : jarvisJson?.workshop?.auxiliaryPowerReroute
             ? 'Auxiliary Power Reroute Active'
-            : 'J.A.R.V.I.S. Autonomous Chief-of-Staff',
+            : 'SARA Autonomous Engine Ready',
           aiModel: `${voiceName} (${String(voiceStyle).toUpperCase()})`,
           missionStatus: runningTask
             ? `Task: ${String(runningTask.goal || '').slice(0, 44)}`

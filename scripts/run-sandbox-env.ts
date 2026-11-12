@@ -17,6 +17,7 @@ import os from "node:os";
 import path from "node:path";
 import net from "node:net";
 import { spawn } from "node:child_process";
+import WebSocket from "ws";
 
 const args = new Set(process.argv.slice(2));
 const verifyMode = args.has("--verify");
@@ -829,6 +830,546 @@ async function runVerification(baseUrl: string): Promise<void> {
     });
 
     return `ASIKernel=SAT, Pushback=CRITICAL_BLOCKED, LabSelfHeal=${labBody.app.attemptsUsed}tries, HouseParty=4/4, Surface=sara_os`;
+  });
+
+  await assertCheck("17. SARA 2050 Horizon Architecture & 3-UI Surface Health (/api/sara-2050/*)", async () => {
+    // 1. Status & Public Key Fingerprint
+    const stRes = await fetch(`${baseUrl}/api/sara-2050/status`);
+    const stBody = (await stRes.json()) as any;
+    if (!stRes.ok || typeof stBody.publicKeyFingerprint !== "string") {
+      throw new Error(`Invalid /api/sara-2050/status: ${JSON.stringify(stBody)}`);
+    }
+
+    // 2. Continuous Multi-Horizon Goal + A2A Envelopes
+    const cgRes = await fetch(`${baseUrl}/api/sara-2050/continuous-goal`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        objective: "Audit all SARA UIs and verify 2050 Horizon subsystem readiness",
+        budgetComputeUnits: 120,
+      }),
+    });
+    const cgBody = (await cgRes.json()) as any;
+    if (!cgRes.ok || !cgBody.plan?.goalId || !Array.isArray(cgBody.plan?.a2aEnvelopes)) {
+      throw new Error(`Continuous goal failed: ${JSON.stringify(cgBody)}`);
+    }
+
+    // 3. Causal World Model Simulation + Neuro-Symbolic Proof-Carrying Decision
+    const wsRes = await fetch(`${baseUrl}/api/sara-2050/world-simulate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "Verify frontend bundle integrity", targetNode: "codebase_integrity" }),
+    });
+    const wsBody = (await wsRes.json()) as any;
+    if (!wsRes.ok || typeof wsBody.prediction?.stabilityScore !== "number") {
+      throw new Error(`World simulate failed: ${JSON.stringify(wsBody)}`);
+    }
+
+    const pdRes = await fetch(`${baseUrl}/api/sara-2050/proof-decision`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ objective: "Apply verified configuration checkpoint" }),
+    });
+    const pdBody = (await pdRes.json()) as any;
+    if (!pdRes.ok || pdBody.decision?.formalProof?.satisfiable !== true) {
+      throw new Error(`Proof decision failed: ${JSON.stringify(pdBody)}`);
+    }
+
+    // 4. Lifelong Local Memory Graph + Affective Calibration + Ed25519 Sign/Verify
+    const memRes = await fetch(`${baseUrl}/api/sara-2050/memory-graph`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "project",
+        label: "SARA Multi-Surface Suite",
+        summary: "Classic SARA, 3D Live Core, and Spatial 2050 UIs verified",
+        privateLocalOnly: true,
+      }),
+    });
+    if (!memRes.ok) throw new Error(`Memory graph upsert failed (${memRes.status})`);
+
+    const affRes = await fetch(`${baseUrl}/api/sara-2050/affective`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ recentMessage: "URGENT! Give me a fast status check right now!" }),
+    });
+    const affBody = (await affRes.json()) as any;
+    if (!affRes.ok || !affBody.profile?.pacing) {
+      throw new Error(`Affective calibration failed: ${JSON.stringify(affBody)}`);
+    }
+
+    const signRes = await fetch(`${baseUrl}/api/sara-2050/provenance/sign`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subject: "sara.e2e", content: "e2e-2050-checkpoint" }),
+    });
+    const signBody = (await signRes.json()) as any;
+    const verRes = await fetch(`${baseUrl}/api/sara-2050/provenance/verify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ certificate: signBody.certificate, content: "e2e-2050-checkpoint" }),
+    });
+    const verBody = (await verRes.json()) as any;
+    if (!verRes.ok || verBody.valid !== true) {
+      throw new Error(`Ed25519 provenance verify failed: ${JSON.stringify(verBody)}`);
+    }
+
+    // 5. Global Alignment Kill-Switch Engage & Reset + 3-Way UI Surface Cycle
+    const ksOn = await fetch(`${baseUrl}/api/sara-2050/governance/kill-switch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reset: false, reason: "Sandbox E2E kill-switch drill" }),
+    });
+    const ksOnBody = (await ksOn.json()) as any;
+    if (!ksOn.ok || ksOnBody.killSwitchActive !== true) {
+      throw new Error(`Kill-switch engage failed: ${JSON.stringify(ksOnBody)}`);
+    }
+    const ksOff = await fetch(`${baseUrl}/api/sara-2050/governance/kill-switch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reset: true, reason: "Sandbox E2E kill-switch reset" }),
+    });
+    const ksOffBody = (await ksOff.json()) as any;
+    if (!ksOff.ok || ksOffBody.killSwitchActive !== false) {
+      throw new Error(`Kill-switch reset failed: ${JSON.stringify(ksOffBody)}`);
+    }
+
+    for (const mode of ["live_core", "sara_os", "companion"] as const) {
+      const mRes = await fetch(`${baseUrl}/api/app-settings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jarvis: { surfaceMode: mode } }),
+      });
+      const mBody = (await mRes.json()) as any;
+      if (!mRes.ok || mBody.jarvis?.surfaceMode !== mode) {
+        throw new Error(`Surface switch to ${mode} failed`);
+      }
+    }
+
+    return `A2AContracts=${cgBody.plan.a2aEnvelopes.length}, WorldStability=${wsBody.prediction.stabilityScore}, Proof=SAT+Ed25519(${signBody.certificate.publicKeyFingerprint.slice(0, 10)}), Surfaces=3/3`;
+  });
+
+  await assertCheck("18. SARA Dual Modes (J.A.R.V.I.S. & Ultron), Executive Ops HUD & Working Local Integrations", async () => {
+    // 1. Default persona status: SARA active, J.A.R.V.I.S. & Ultron OFF
+    const p0Res = await fetch(`${baseUrl}/api/persona/status`);
+    const p0 = (await p0Res.json()) as any;
+    if (!p0Res.ok || p0.personas?.activeMode !== "sara" || p0.personas?.jarvisActive !== false || p0.personas?.ultronActive !== false) {
+      throw new Error(`Expected SARA default with sub-modes OFF: ${JSON.stringify(p0)}`);
+    }
+
+    // 2. Activate J.A.R.V.I.S. -> surfaceMode automatically becomes live_core
+    const pJarvis = await fetch(`${baseUrl}/api/persona/switch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target: "jarvis" }),
+    }).then((r) => r.json() as any);
+    if (pJarvis.surfaceMode !== "live_core" || pJarvis.personas?.jarvisActive !== true) {
+      throw new Error(`J.A.R.V.I.S. switch failed: ${JSON.stringify(pJarvis)}`);
+    }
+
+    // 3. Natural command in J.A.R.V.I.S. ("Log ₹1,200 for server hosting" + "activate ultron")
+    const expCmd = await fetch(`${baseUrl}/api/jarvis/command`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command: "Log ₹1,200 for server hosting" }),
+    }).then((r) => r.json() as any);
+    if (expCmd.intent !== "ledger" || expCmd.data?.entry?.amount !== 1200) {
+      throw new Error(`Voice ledger failed: ${JSON.stringify(expCmd)}`);
+    }
+
+    const switchToUltron = await fetch(`${baseUrl}/api/jarvis/command`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command: "activate ultron" }),
+    }).then((r) => r.json() as any);
+    if (switchToUltron.surfaceMode !== "ultron" || switchToUltron.personas?.ultronActive !== true) {
+      throw new Error(`Voice switch to Ultron failed: ${JSON.stringify(switchToUltron)}`);
+    }
+
+    // 4. Ultron Command Stream (/api/ultron/command) + return to SARA
+    const uShell = await fetch(`${baseUrl}/api/ultron/command`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command: "cmd: echo ULTRON_READY" }),
+    }).then((r) => r.json() as any);
+    if (uShell.intent !== "os_exec" || !String(uShell.reply).includes("ULTRON_READY")) {
+      throw new Error(`Ultron shell failed: ${JSON.stringify(uShell)}`);
+    }
+
+    const backSara = await fetch(`${baseUrl}/api/ultron/command`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command: "stand down" }),
+    }).then((r) => r.json() as any);
+    if (backSara.surfaceMode !== "companion" || backSara.personas?.activeMode !== "sara") {
+      throw new Error(`Return to SARA failed: ${JSON.stringify(backSara)}`);
+    }
+
+    // 5. Executive Boardroom & Smart Room IoT
+    const boardRes = await fetch(`${baseUrl}/api/executive/boardroom`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic: "Evaluate AttendEasy campus rollout" }),
+    }).then((r) => r.json() as any);
+    if (!Array.isArray(boardRes.debate?.opinions) || boardRes.debate.opinions.length !== 4) {
+      throw new Error(`Boardroom failed: ${JSON.stringify(boardRes)}`);
+    }
+
+    const iotRes = await fetch(`${baseUrl}/api/executive/iot`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command: "lock down workspace" }),
+    }).then((r) => r.json() as any);
+    if (!iotRes.ok || !Array.isArray(iotRes.devices)) throw new Error(`Smart Room lockdown failed: ${JSON.stringify(iotRes)}`);
+
+    // 6. Real Working Local Integrations CRUD + Test + Invoke + Delete
+    const intCreate = await fetch(`${baseUrl}/api/integrations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Repo Docs", category: "documents", endpointOrPath: process.cwd() }),
+    }).then((r) => r.json() as any);
+    const connId = intCreate.connector?.id;
+    if (!connId) throw new Error(`Integration create failed: ${JSON.stringify(intCreate)}`);
+
+    const intTest = await fetch(`${baseUrl}/api/integrations/${connId}/test`, { method: "POST" }).then((r) => r.json() as any);
+    if (intTest.ok !== true) throw new Error(`Integration test failed: ${JSON.stringify(intTest)}`);
+
+    const intInvoke = await fetch(`${baseUrl}/api/integrations/${connId}/invoke`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    }).then((r) => r.json() as any);
+    if (intInvoke.ok !== true) throw new Error(`Integration invoke failed: ${JSON.stringify(intInvoke)}`);
+
+    await fetch(`${baseUrl}/api/integrations/${connId}`, { method: "DELETE" });
+
+    return `Modes(sara->jarvis->ultron->sara)=4/4, Ledger=₹1200, Boardroom=4agents, SmartRoom=Lockdown, Integrations=CRUD+Test+Invoke`;
+  });
+
+  await assertCheck("19. Windows 10 Pro Central Operating Layer (/api/col/*, /ws/col/*) & 3-Factor Boot Security Gate (/api/boot-gate/*)", async () => {
+    // 1. Engage Windows Pre-Desktop Security Gate
+    const lockRes = await fetch(`${baseUrl}/api/boot-gate/lock`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: "Windows 10 Pro Boot Sequence E2E" }),
+    }).then((r) => r.json() as any);
+    if (lockRes.gateLocked !== true || lockRes.zeroCapabilityLock !== true) {
+      throw new Error(`Boot gate lock failed: ${JSON.stringify(lockRes)}`);
+    }
+
+    // 2. Wrong password -> HTTP 401 ACCESS DENIED
+    const denyRes = await fetch(`${baseUrl}/api/boot-gate/verify-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "wrong-password" }),
+    });
+    if (denyRes.status !== 401) throw new Error(`Expected 401 on wrong boot password, got ${denyRes.status}`);
+
+    // 3. Verify Face ID + Voice Code -> ACCESS GRANTED + Welcome Greeting
+    const faceVec = Array.from({ length: 32 }, (_, i) => Number((0.5 + 0.2 * Math.cos(i * 0.3)).toFixed(4)));
+    const faceOk = await fetch(`${baseUrl}/api/boot-gate/verify-face`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ descriptor: faceVec }),
+    }).then((r) => r.json() as any);
+    if (faceOk.matched !== true) throw new Error(`Face verification failed: ${JSON.stringify(faceOk)}`);
+
+    const voiceOk = await fetch(`${baseUrl}/api/boot-gate/verify-voice`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ transcript: "SARA authorize access" }),
+    }).then((r) => r.json() as any);
+    if (voiceOk.granted !== true || voiceOk.status?.gateLocked !== false) {
+      throw new Error(`Voice unlock failed: ${JSON.stringify(voiceOk)}`);
+    }
+
+    // 4. Mount Windows 10 WorkerW Live Wallpaper + Execute Host Command (Zero Capability Auth Lock)
+    const wpRes = await fetch(`${baseUrl}/api/col/wallpaper`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    }).then((r) => r.json() as any);
+    if (wpRes.enabled !== true) throw new Error(`Wallpaper toggle failed: ${JSON.stringify(wpRes)}`);
+
+    const cmdRes = await fetch(`${baseUrl}/api/col/command`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command: "cmd: echo CENTRAL_OS_WIN10_READY" }),
+    }).then((r) => r.json() as any);
+    if (!String(cmdRes.reply).includes("CENTRAL_OS_WIN10_READY")) {
+      throw new Error(`Central OS command failed: ${JSON.stringify(cmdRes)}`);
+    }
+
+    // 5. Connect Live WebSocket Hardware Spoke Node (`/ws/col/esp32_lab/iot`) & Dispatch Action
+    const wsUrl = baseUrl.replace(/^http/, "ws") + "/ws/col/esp32_lab/iot";
+    await new Promise<void>((resolve, reject) => {
+      const ws = new WebSocket(wsUrl);
+      const timer = setTimeout(() => {
+        ws.close();
+        reject(new Error("Timed out connecting spoke WebSocket"));
+      }, 6000);
+
+      ws.on("open", async () => {
+        ws.send(JSON.stringify({ type: "REGISTER", capabilities: ["power_workbench"] }));
+        ws.on("message", (raw) => {
+          const msg = JSON.parse(String(raw));
+          if (msg.type === "EXECUTE") {
+            ws.send(
+              JSON.stringify({
+                type: "RESULT",
+                req_id: msg.req_id,
+                data: { status: "ESP32_RELAY_ACTIVE" },
+              }),
+            );
+          }
+        });
+
+        try {
+          const execSpoke = await fetch(`${baseUrl}/api/col/node/esp32_lab/execute`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ command: "power_workbench", params: { gpio: 4 } }),
+          }).then((r) => r.json() as any);
+          clearTimeout(timer);
+          ws.close();
+          if (execSpoke.result?.status !== "ESP32_RELAY_ACTIVE") {
+            reject(new Error(`Spoke dispatch mismatch: ${JSON.stringify(execSpoke)}`));
+            return;
+          }
+          resolve();
+        } catch (err) {
+          clearTimeout(timer);
+          ws.close();
+          reject(err as Error);
+        }
+      });
+      ws.on("error", (err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+    });
+
+    // 6. Verify `central_os` surface mode persistence & restore `companion`
+    const surfRes = await fetch(`${baseUrl}/api/app-settings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jarvis: { surfaceMode: "central_os" } }),
+    }).then((r) => r.json() as any);
+    if (surfRes.jarvis?.surfaceMode !== "central_os") {
+      throw new Error(`central_os surface persistence failed`);
+    }
+    await fetch(`${baseUrl}/api/app-settings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jarvis: { surfaceMode: "companion" } }),
+    });
+
+    return `BootGate(Deny401->Face+VoiceGrant)=OK, Wallpaper=WorkerW, Win10Cmd=OK, SpokeWS(esp32_lab)=ESP32_RELAY_ACTIVE, Surface=central_os`;
+  });
+
+  await assertCheck("20. Wave 4 — 3-Layer Control, Smart Half-Task ('play arjit song'), Sandbox Skill Trainer, Frontier Suite & /ws/holo", async () => {
+    // 1. 3-Layer Control Router (Layer 1 Shell)
+    const l1Res = await fetch(`${baseUrl}/api/col/layers/execute`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        goal: "Verify Layer 1 Shell",
+        preferredLayer: "layer1_shell",
+        shellCommand: "echo WAVE4_3LAYER_OK",
+      }),
+    }).then((r) => r.json() as any);
+    if (!l1Res.ok || l1Res.result?.layerUsed !== "layer1_shell" || !String(l1Res.result?.output).includes("WAVE4_3LAYER_OK")) {
+      throw new Error(`3-Layer execution failed: ${JSON.stringify(l1Res)}`);
+    }
+
+    // 2. Smart Half-Task Completer ("play arjit song" — Zero clarifying questions!)
+    const halfRes = await fetch(`${baseUrl}/api/col/smart-intent`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "play arjit song", autoOpenBrowser: false }),
+    }).then((r) => r.json() as any);
+    if (!halfRes.ok || halfRes.completion?.askedClarifyingQuestion !== false) {
+      throw new Error(`Smart Half-Task failed: ${JSON.stringify(halfRes)}`);
+    }
+
+    // 3. Autonomous Internet Skill Trainer + Isolated Sandbox Practice + Dynamic Execution
+    const trainRes = await fetch(`${baseUrl}/api/col/skills/train`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic: "sandbox_log_line_counter" }),
+    }).then((r) => r.json() as any);
+    if (!trainRes.ok || !trainRes.mastered) {
+      throw new Error(`Sandbox Skill Trainer failed: ${JSON.stringify(trainRes)}`);
+    }
+    const runRes = await fetch(`${baseUrl}/api/col/skills/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ skill: trainRes.skill.skillName, kwargs: { text: "one two three four" } }),
+    }).then((r) => r.json() as any);
+    if (!runRes.ok || runRes.output?.word_count !== 4) {
+      throw new Error(`Dynamic Skill Execution failed: ${JSON.stringify(runRes)}`);
+    }
+
+    // 4. Frontier Suite (Ghost Worker + Synthetic Boardroom + .sara Soul Capsule)
+    await fetch(`${baseUrl}/api/col/frontier/ghost-worker`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Sandbox Nightly Backup", kind: "config_backup" }),
+    });
+    const ghostRun = await fetch(`${baseUrl}/api/col/frontier/ghost-worker/run`, { method: "POST" }).then((r) => r.json() as any);
+    if (!ghostRun.ok || ghostRun.completedCount < 1) {
+      throw new Error(`Ghost Worker failed: ${JSON.stringify(ghostRun)}`);
+    }
+    const capsule = await fetch(`${baseUrl}/api/col/frontier/soul-capsule/export`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ passphrase: "sandbox-capsule-secret" }),
+    }).then((r) => r.json() as any);
+    if (!capsule.ok || !(capsule.bytes > 30)) {
+      throw new Error(`Soul Capsule export failed: ${JSON.stringify(capsule)}`);
+    }
+
+    // 5. Holographic Spatial Projection WebSocket Bridge (`/ws/holo`)
+    const { WebSocket } = await import("ws");
+    const wsUrl = baseUrl.replace(/^http/, "ws") + "/ws/holo";
+    await new Promise<void>((resolve, reject) => {
+      const ws = new WebSocket(wsUrl);
+      const timer = setTimeout(() => {
+        ws.close();
+        reject(new Error("Timed out waiting for /ws/holo HOLO_FRAME"));
+      }, 6000);
+      ws.on("message", (raw) => {
+        const frame = JSON.parse(String(raw));
+        if (frame.type === "HOLO_FRAME" && frame.mirrorReady === true) {
+          clearTimeout(timer);
+          ws.close();
+          resolve();
+        }
+      });
+      ws.on("error", (err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+    });
+
+    return `3Layer=ShellOK, HalfTask("play arjit song")=ZeroQuestions, SandboxTrainer=${trainRes.skill.skillName}(PRACTICE_PASSED), GhostWorker=OK, SoulCapsule=${capsule.bytes}B, HoloWS=OK`;
+  });
+
+  await assertCheck("21. Wave 5 — Complete Avengers AI Pantheon: V.I.S.I.O.N., Phasing, 3D Blueprint, E.D.I.T.H. Abort Rollback, F.R.I.D.A.Y., G.R.I.O.T., VERONICA & K.A.R.E.N.", async () => {
+    // 1. Persona switching to V.I.S.I.O.N. & F.R.I.D.A.Y. and back to SARA
+    const visMode = await fetch(`${baseUrl}/api/persona/switch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target: "vision" }),
+    }).then((r) => r.json() as any);
+    if (!visMode.ok || visMode.personas?.activeMode !== "vision" || visMode.surfaceMode !== "vision") {
+      throw new Error(`V.I.S.I.O.N. persona switch failed: ${JSON.stringify(visMode)}`);
+    }
+    const friMode = await fetch(`${baseUrl}/api/persona/switch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target: "friday" }),
+    }).then((r) => r.json() as any);
+    if (!friMode.ok || friMode.personas?.activeMode !== "friday") {
+      throw new Error(`F.R.I.D.A.Y. persona switch failed: ${JSON.stringify(friMode)}`);
+    }
+    await fetch(`${baseUrl}/api/persona/switch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target: "sara" }),
+    });
+
+    // 2. V.I.S.I.O.N. Triad + Phasing Zero-Trace + Mind-Stone Nexus
+    const triad = await fetch(`${baseUrl}/api/avengers/vision/triad`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic: "Resilient local-first Stark architecture" }),
+    }).then((r) => r.json() as any);
+    if (!triad.ok || !triad.synthesis?.visionSynthesis?.mindStoneVerdict) {
+      throw new Error(`Vision Triad failed: ${JSON.stringify(triad)}`);
+    }
+
+    const zt = await fetch(`${baseUrl}/api/avengers/vision/zero-trace`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename: "phase-test.txt", content: "ghost" }),
+    }).then((r) => r.json() as any);
+    if (!zt.ok || !fs.existsSync(zt.ephemeralPath)) {
+      throw new Error(`Zero-Trace write failed: ${JSON.stringify(zt)}`);
+    }
+    await fetch(`${baseUrl}/api/avengers/vision/phase`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: false }),
+    });
+    if (fs.existsSync(zt.ephemeralPath)) {
+      throw new Error("Zero-Trace file was not shredded upon unphasing!");
+    }
+
+    const nexus = await fetch(`${baseUrl}/api/avengers/vision/nexus`, { method: "POST" }).then((r) => r.json() as any);
+    if (!nexus.ok || !(nexus.correlations?.length >= 1)) {
+      throw new Error(`Mind-Stone Nexus failed: ${JSON.stringify(nexus)}`);
+    }
+
+    // 3. Stark 3D Blueprint + E.D.I.T.H. Transactional Batch & Instant "Abort! Abort!" Rollback
+    const bp = await fetch(`${baseUrl}/api/avengers/jarvis/blueprint-3d`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: "ESP32 smart door lock with relay" }),
+    }).then((r) => r.json() as any);
+    if (!bp.ok || !(bp.blueprint?.totalEstimatedBomInr > 500)) {
+      throw new Error(`3D Blueprint failed: ${JSON.stringify(bp)}`);
+    }
+
+    const tmpRollFile = path.join(os.tmpdir(), `edith-rollback-${Date.now()}.txt`);
+    fs.writeFileSync(tmpRollFile, "BEFORE_EDITH_BATCH", "utf8");
+    const staged = await fetch(`${baseUrl}/api/avengers/edith/batch/stage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Sandbox Rollback Drill",
+        operations: [{ kind: "write_file", targetPath: tmpRollFile, content: "AFTER_EDITH_BATCH" }],
+      }),
+    }).then((r) => r.json() as any);
+    await fetch(`${baseUrl}/api/avengers/edith/batch/execute`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ batchId: staged.batch.batchId }),
+    });
+    const abortRes = await fetch(`${baseUrl}/api/avengers/edith/abort`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ batchId: staged.batch.batchId }),
+    }).then((r) => r.json() as any);
+    const restoredContent = fs.readFileSync(tmpRollFile, "utf8");
+    fs.rmSync(tmpRollFile, { force: true });
+    if (!abortRes.ok || restoredContent !== "BEFORE_EDITH_BATCH") {
+      throw new Error(`E.D.I.T.H. Abort Rollback failed: content=${restoredContent}`);
+    }
+
+    // 4. F.R.I.D.A.Y. Suit Reroute + G.R.I.O.T. Cockpit + VERONICA Drop-Pod
+    const suit = await fetch(`${baseUrl}/api/avengers/friday/suit-reroute`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ simulateFaultIn: "gemini_cloud_brain" }),
+    }).then((r) => r.json() as any);
+    await fetch(`${baseUrl}/api/avengers/friday/suit-reroute`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ simulateFaultIn: "clear" }),
+    });
+    const cockpit = await fetch(`${baseUrl}/api/avengers/griot/cockpit`).then((r) => r.json() as any);
+    const pod = await fetch(`${baseUrl}/api/avengers/veronica/drop-pod`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ passphrase: "sandbox-veronica-key" }),
+    }).then((r) => r.json() as any);
+
+    if (!suit.ok || !cockpit.ok || !pod.ok) {
+      throw new Error("F.R.I.D.A.Y. / G.R.I.O.T. / VERONICA check failed");
+    }
+
+    return `Vision+Friday=OK, ZeroTracePhasing=Shredded, 3DBlueprint=₹${bp.blueprint.totalEstimatedBomInr}, EdithAbortRollback=Verified, SuitReroute=${suit.overallIntegrityPct}%, GriotCockpit=OK, VeronicaPod=${pod.bytes}B`;
   });
 
   console.log("\n================================================================================");

@@ -1302,6 +1302,22 @@ async function startServer() {
   app.post("/api/learn/sessions/:id/experiments", async (req, res) => { try { res.json(await learningEngine.addExperiment(req.params.id, { objective: String(req.body?.objective || ""), method: String(req.body?.method || ""), outcome: String(req.body?.outcome || ""), verified: false })); } catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : String(error) }); } });
   app.post("/api/learn/sessions/:id/practice", (req, res) => { try { if (!runtimeRef) return res.status(503).json({ error: "Task runtime is not ready." }); const session = learningEngine.list().find((item) => item.id === String(req.params.id)); if (!session) return res.status(404).json({ error: "Learning session not found." }); const objective = String(req.body?.objective || session.modules[0] || "Practice the learning objective").trim().slice(0, 300); if (!objective) return res.status(400).json({ error: "Practice objective is required." }); const task = runtimeRef.manager.start(`${session.objective}. Practice goal: ${objective}`, "api"); learningPracticeTasks.set(task.id, { sessionId: session.id, objective }); res.status(202).json({ taskId: task.id, objective, status: task.state }); } catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : String(error) }); } });
   app.post("/api/learn/sessions/:id/assess", async (req, res) => { try { res.json(await learningEngine.assess(req.params.id, { demonstrated: req.body?.demonstrated === true, evidence: String(req.body?.evidence || "") })); } catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : String(error) }); } });
+  app.post("/api/learn/internet", async (req, res) => {
+    try {
+      const prompt = String(req.body?.prompt || req.body?.topic || "").trim();
+      const urls = Array.isArray(req.body?.urls) ? req.body.urls.map(String) : undefined;
+      const result = await learningEngine.learnFromInternetPrompt({
+        prompt,
+        depth: req.body?.depth,
+        urls,
+        geminiApiKey: hasGeminiApiKey() ? getGeminiApiKey() : undefined,
+        autoSave: req.body?.autoSave !== false,
+      });
+      res.status(201).json({ ok: true, ...result });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
   // Backward-compatible aliases for the canonical API Hub registry.
   app.get("/api/apis", (req, res) => res.json(apiHub.registry.search(String(req.query.q || ""), { limit: 50 })));
   app.get("/api/apis/status", (_req, res) => res.json(apiHub.status()));
@@ -2296,15 +2312,101 @@ async function startServer() {
     const lower = rawText.toLowerCase();
 
     try {
+      // 0. Automatic Mode & UI Switching ("activate Jarvis", "activate Ultron", "switch to SARA", "deactivate Jarvis")
+      if (/\b(activate jarvis|start jarvis|switch to jarvis|jarvis mode|open jarvis)\b/i.test(lower)) {
+        const updated = await runtime.switchPersonaMode("jarvis");
+        return res.json({
+          ok: true,
+          intent: "mode_switch",
+          reply: "J.A.R.V.I.S. online, Boss. Launching Core UI now.",
+          surfaceMode: updated.jarvis.surfaceMode,
+          personas: updated.personas,
+          voiceStyle: updated.voice.style,
+        });
+      }
+      if (/\b(activate ultron|start ultron|switch to ultron|ultron mode|open ultron)\b/i.test(lower)) {
+        const updated = await runtime.switchPersonaMode("ultron");
+        return res.json({
+          ok: true,
+          intent: "mode_switch",
+          reply: "Activating ULTRON mode now, Boss. Transferring control and UI to Ultron.",
+          surfaceMode: updated.jarvis.surfaceMode,
+          personas: updated.personas,
+          voiceStyle: updated.voice.style,
+        });
+      }
+      if (/\b(switch to sara|back to sara|activate sara|deactivate jarvis|turn off jarvis)\b/i.test(lower)) {
+        const updated = await runtime.switchPersonaMode("sara");
+        return res.json({
+          ok: true,
+          intent: "mode_switch",
+          reply: "Switching back to SARA, Boss.",
+          surfaceMode: updated.jarvis.surfaceMode,
+          personas: updated.personas,
+          voiceStyle: updated.voice.style,
+        });
+      }
+
+      // 0b. Voice Bookkeeping & Expense Logger ("log ₹1,200 for server hosting", "log $300 income...")
+      if (/\b(log|record|add)\b.*(?:₹|rs\.?|inr|\$|€|\bexpense\b|\bincome\b|\bspent\b)/i.test(lower)) {
+        const logged = runtime.executiveOps.logFromNaturalUtterance(rawText);
+        return res.json({
+          ok: true,
+          intent: "ledger",
+          reply: logged.spokenConfirmation,
+          voiceStyle: runtime.settings.get().voice.style,
+          data: logged,
+        });
+      }
+
+      // 0c. Multi-Agent Boardroom ("boardroom: ...", "ask the boardroom ...")
+      if (/\b(boardroom|convene agents)\b/i.test(lower)) {
+        const topic = rawText.replace(/^.*?\b(?:boardroom|convene agents)\b\s*[:\-]?\s*/i, "").trim() || rawText;
+        const debate = await runtime.executiveOps.conveneBoardroom(topic);
+        return res.json({
+          ok: true,
+          intent: "boardroom",
+          reply: `${debate.executiveSynthesis} Recommended action: ${debate.recommendedAction}`,
+          voiceStyle: runtime.settings.get().voice.style,
+          data: debate,
+        });
+      }
+
+      // 0d. Smart Room & IoT Lockdown ("lock down the workspace", "dim lights")
+      if (/\b(lock down the workspace|workspace lockdown|dim lights|smart room|turn (?:on|off) .*light)\b/i.test(lower)) {
+        const room = await runtime.executiveOps.triggerSmartRoomCommand(rawText);
+        return res.json({
+          ok: true,
+          intent: "smart_room",
+          reply: room.spokenSummary,
+          voiceStyle: runtime.settings.get().voice.style,
+          data: room,
+        });
+      }
+
+      // 0e. Voice Workspace Context Switch ("switch to business mode", "pull up AttendEasy")
+      if (/\b(switch to business mode|pull up .*attendeasy|attendeasy workspace|switch workspace)\b/i.test(lower)) {
+        const ctx = /attendeasy/i.test(lower) ? "AttendEasy" : "business_mode";
+        const switched = runtime.executiveOps.switchWorkspaceContext(ctx);
+        return res.json({
+          ok: true,
+          intent: "workspace_context",
+          reply: switched.spokenNote,
+          voiceStyle: runtime.settings.get().voice.style,
+          data: switched,
+        });
+      }
+
       // 1. Morning / Executive Briefing
       if (/\b(briefing|morning report|sitrep|status report|daily summary)\b/i.test(lower)) {
         const briefing = await jarvisChief.generateBriefing();
+        const execBrief = runtime.executiveOps.generateMorningExecutiveBriefing();
         return res.json({
           ok: true,
           intent: "briefing",
-          reply: briefing.spokenBriefing || "Systems nominal, Boss. Your executive briefing is ready on the HUD.",
+          reply: `${briefing.spokenBriefing} ${execBrief.priorities.slice(0, 2).join(" ")}`,
           voiceStyle: runtime.settings.get().voice.style,
-          data: briefing,
+          data: { ...briefing, executive: execBrief },
         });
       }
 
@@ -2404,15 +2506,15 @@ async function startServer() {
         });
       }
 
-      // 8. Project ULTRON Directives
-      if (/\b(ultron)\b/i.test(lower)) {
-        if (/\b(kill switch|stand down|halt ultron)\b/i.test(lower)) {
+      // 8. SARA Sentinel Defense & Swarm Directives
+      if (/\b(ultron|sentinel|perimeter defense)\b/i.test(lower)) {
+        if (/\b(kill switch|stand down|halt)\b/i.test(lower)) {
           const ks = await ultronEngine.engageKillSwitch("jarvis_command_deck", true);
           await runtime.settings.update({ ultron: { enabled: false, stance: "standby" } });
           return res.json({
             ok: true,
             intent: "ultron_kill_switch",
-            reply: "Ultron emergency kill switch engaged, Boss. All sentries recalled and returned to standby.",
+            reply: "Emergency sentinel kill switch engaged. All sub-agents recalled and returned to standby.",
             voiceStyle: runtime.settings.get().voice.style,
             data: ks,
           });
@@ -2422,7 +2524,7 @@ async function startServer() {
           return res.json({
             ok: true,
             intent: "ultron_scan",
-            reply: scan.spokenSummary || `Ultron perimeter sweep complete, Boss. Armor score: ${scan.armorScore}/100.`,
+            reply: scan.spokenSummary || `Perimeter security sweep complete. Defense score: ${scan.armorScore}/100.`,
             voiceStyle: runtime.settings.get().voice.style,
             data: scan,
           });
@@ -2432,7 +2534,7 @@ async function startServer() {
           return res.json({
             ok: true,
             intent: "ultron_legion",
-            reply: `${legion.hiveMindSynthesis} Standing by for your next directive, Boss.`,
+            reply: `${legion.hiveMindSynthesis} Standing by for your next directive.`,
             voiceStyle: runtime.settings.get().voice.style,
             data: legion,
           });
@@ -2449,7 +2551,7 @@ async function startServer() {
         return res.json({
           ok: true,
           intent: "ultron_stance",
-          reply: `Project Ultron transitioned to ${targetStance.replace(/_/g, " ").toUpperCase()} stance, Boss.`,
+          reply: `SARA Sentinel Defense transitioned to ${targetStance.replace(/_/g, " ").toUpperCase()} stance.`,
           voiceStyle: runtime.settings.get().voice.style,
           data: st,
         });
@@ -2503,17 +2605,22 @@ async function startServer() {
         });
       }
 
-      // 12. Conversational / Engineering Advisory (Gemini if configured, deterministic J.A.R.V.I.S. fallback otherwise)
+      // 12. Conversational / Engineering Advisory (Gemini if configured; adapts to active SARA girl vs J.A.R.V.I.S. boy persona)
       if (hasGeminiApiKey()) {
         try {
           const client = new GoogleGenAI({ apiKey: getGeminiApiKey() });
           const activeTasks = runtime.tasks.list().slice(0, 5).map((t) => `${t.goal} [${t.state}]`).join("; ") || "none";
+          const affectiveDirective = runtime.sara2050.status().affectiveProfile.guidanceNote;
+          const activePersonaMode = runtime.settings.get().personas.activeMode;
+          const personaInstruction =
+            activePersonaMode === "sara"
+              ? `You are SARA, a real, warm, witty, confident young woman sharing life and work with Boss. Sound genuinely human, natural in English/Hinglish, observant, and direct — never like a scripted chatbot. ${affectiveDirective}`
+              : `You are J.A.R.V.I.S., a real, sharp, charismatic guy and Boss's male chief-of-staff (sharing the exact same core memory and capabilities as SARA). Speak with calm male confidence, understated dry wit, gentle pushback if Boss makes a bad assumption, and crisp technical clarity. ${affectiveDirective}`;
           const llmRes = await client.models.generateContent({
             model: "gemini-2.5-flash",
-            contents: `System telemetry: Active tasks: ${activeTasks}. Ultron stance: ${ultronEngine.status().stance}. Auxiliary power reroute: ${jarvisWorkshop.isAuxiliaryPowerReroute()}.\nBoss says: ${rawText}`,
+            contents: `System telemetry: Active tasks: ${activeTasks}. Workspace: ${runtime.executiveOps.status().activeWorkspaceContext}. Auxiliary power reroute: ${jarvisWorkshop.isAuxiliaryPowerReroute()}.\nBoss says: ${rawText}`,
             config: {
-              systemInstruction:
-                "You are SARA operating in J.A.R.V.I.S. Chief-of-Staff mode for Boss. Speak with calm, refined, aristocratic composure, sharp engineering judgment, and occasional understated dry wit. Keep your response concise (1-3 sentences), concrete, and directly useful. Never use generic chatbot filler.",
+              systemInstruction: `${personaInstruction} Keep your response concise (1-3 sentences), concrete, and directly useful.`,
             },
           });
           const textReply = String(llmRes.text || "").trim();
@@ -2526,7 +2633,7 @@ async function startServer() {
             });
           }
         } catch {
-          // Fall back gracefully to deterministic J.A.R.V.I.S. chief-of-staff synthesis below.
+          // Fall back gracefully to deterministic SARA synthesis below.
         }
       }
 
@@ -2861,6 +2968,924 @@ async function startServer() {
   app.get("/api/jarvis/return-briefing", (req, res) => {
     const trigger = typeof req.query.trigger === "string" ? req.query.trigger : "manual";
     res.json(runtime.guardianSuite.synthesizeLiveBriefing(trigger));
+  });
+
+  // ---- SARA 2050 Horizon Architecture (Continuous Agency, World Model, Proofs, Memory Graph, Affective & Provenance) ----
+  app.get("/api/sara-2050/status", (_req, res) => {
+    res.json(runtime.sara2050.status());
+  });
+  app.post("/api/sara-2050/continuous-goal", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    const objective = String(req.body?.objective || "").trim();
+    if (!objective) return res.status(400).json({ error: "Parameter 'objective' is required." });
+    try {
+      const plan = await runtime.sara2050.launchContinuousGoal(
+        objective,
+        typeof req.body?.budgetComputeUnits === "number" ? req.body.budgetComputeUnits : 100,
+      );
+      res.status(201).json({ ok: true, plan });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.post("/api/sara-2050/world-simulate", (req, res) => {
+    const action = String(req.body?.action || "").trim();
+    if (!action) return res.status(400).json({ error: "Parameter 'action' is required." });
+    const prediction = runtime.sara2050.simulateWorldIntervention(
+      action,
+      typeof req.body?.targetNode === "string" ? req.body.targetNode : undefined,
+    );
+    res.json({ ok: true, prediction });
+  });
+  app.post("/api/sara-2050/proof-decision", async (req, res) => {
+    const objective = String(req.body?.objective || "").trim();
+    if (!objective) return res.status(400).json({ error: "Parameter 'objective' is required." });
+    const decision = await runtime.sara2050.createProofCarryingDecision(objective, runtime.isOwnerAuthorized());
+    res.json({ ok: decision.formalProof.satisfiable, decision });
+  });
+  app.get("/api/sara-2050/memory-graph", (req, res) => {
+    const query = typeof req.query.query === "string" ? req.query.query : "";
+    res.json(runtime.sara2050.queryMemorySubgraph(query, 12));
+  });
+  app.post("/api/sara-2050/memory-graph", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    const label = String(req.body?.label || "").trim();
+    const summary = String(req.body?.summary || "").trim();
+    if (!label || !summary) return res.status(400).json({ error: "Parameters 'label' and 'summary' are required." });
+    const node = await runtime.sara2050.upsertMemoryNode({
+      kind: (req.body?.kind as "person" | "project" | "concept" | "preference" | "decision" | "episode") || "concept",
+      label,
+      summary,
+      salience: typeof req.body?.salience === "number" ? req.body.salience : undefined,
+      privateLocalOnly: req.body?.privateLocalOnly !== false,
+      relateToLabel: typeof req.body?.relateToLabel === "string" ? req.body.relateToLabel : undefined,
+      relation: typeof req.body?.relation === "string" ? req.body.relation : undefined,
+    });
+    res.status(201).json({ ok: true, node });
+  });
+  app.post("/api/sara-2050/affective", (req, res) => {
+    const profile = runtime.sara2050.calibrateAffectiveState({
+      recentMessage: typeof req.body?.recentMessage === "string" ? req.body.recentMessage : undefined,
+      backspaceRatio: typeof req.body?.backspaceRatio === "number" ? req.body.backspaceRatio : undefined,
+      windowSwitchesPerMin: typeof req.body?.windowSwitchesPerMin === "number" ? req.body.windowSwitchesPerMin : undefined,
+      sessionMinutes: typeof req.body?.sessionMinutes === "number" ? req.body.sessionMinutes : undefined,
+    });
+    res.json({ ok: true, profile });
+  });
+  app.post("/api/sara-2050/provenance/sign", (req, res) => {
+    const subject = String(req.body?.subject || "sara.artifact").trim();
+    const content = String(req.body?.content || "");
+    const certificate = runtime.sara2050.signProvenance(subject, content);
+    res.json({ ok: true, certificate });
+  });
+  app.post("/api/sara-2050/provenance/verify", (req, res) => {
+    const certificate = req.body?.certificate;
+    const content = String(req.body?.content || "");
+    if (!certificate || typeof certificate !== "object") {
+      return res.status(400).json({ error: "Parameter 'certificate' is required." });
+    }
+    const verification = runtime.sara2050.verifyProvenance(certificate, content);
+    res.json({ ok: verification.valid, ...verification });
+  });
+  app.post("/api/sara-2050/governance/kill-switch", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    const reset = req.body?.reset === true;
+    const reason = String(req.body?.reason || (reset ? "Owner authorized resume" : "Human operator override"));
+    const audit = reset
+      ? await runtime.sara2050.resetGlobalKillSwitch(reason)
+      : await runtime.sara2050.engageGlobalKillSwitch(reason);
+    res.json({ ok: true, killSwitchActive: !reset, audit });
+  });
+
+  // ---- Multi-Persona Mode Orchestrator (SARA Girl <-> J.A.R.V.I.S. Boy <-> ULTRON) ----
+  app.get("/api/persona/status", (_req, res) => {
+    const cur = runtime.settings.get();
+    res.json({
+      ok: true,
+      personas: cur.personas,
+      surfaceMode: cur.jarvis.surfaceMode,
+      activeVoice: cur.voice.voiceName,
+    });
+  });
+
+  app.post("/api/persona/switch", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    const raw = String(req.body?.target || req.body?.mode || "sara").toLowerCase();
+    const target: "sara" | "jarvis" | "ultron" | "vision" | "friday" =
+      raw === "jarvis"
+        ? "jarvis"
+        : raw === "ultron"
+          ? "ultron"
+          : raw === "vision"
+            ? "vision"
+            : raw === "friday"
+              ? "friday"
+              : "sara";
+    const updated = await runtime.switchPersonaMode(target);
+    res.json({
+      ok: true,
+      target,
+      personas: updated.personas,
+      surfaceMode: updated.jarvis.surfaceMode,
+      voiceName: updated.voice.voiceName,
+    });
+  });
+
+  // ---- Movie-Grade Executive, CRM, Ledger, Boardroom, IoT & Concierge Routes ----
+  app.get("/api/executive/status", (_req, res) => {
+    res.json({ ok: true, ...runtime.executiveOps.status() });
+  });
+  app.get("/api/executive/briefing", (_req, res) => {
+    const upcomingReminders = runtime.utilities.list().slice(0, 3).map((u) => u.label);
+    res.json({
+      ok: true,
+      ...runtime.executiveOps.generateMorningExecutiveBriefing({
+        pendingTasksCount: runtime.tasks.active().length,
+        upcomingReminders,
+      }),
+    });
+  });
+  app.post("/api/executive/ledger", (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    if (typeof req.body?.utterance === "string" && req.body.utterance.trim()) {
+      return res.status(201).json({ ok: true, ...runtime.executiveOps.logFromNaturalUtterance(req.body.utterance) });
+    }
+    const out = runtime.executiveOps.logLedgerEntry({
+      kind: req.body?.kind,
+      amount: Number(req.body?.amount) || 0,
+      currency: req.body?.currency,
+      category: req.body?.category,
+      description: String(req.body?.description || "Ledger entry"),
+      project: req.body?.project,
+      source: req.body?.source || "manual",
+    });
+    res.status(201).json({ ok: true, ...out });
+  });
+  app.post("/api/executive/crm", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      const out = await runtime.executiveOps.upsertCrmDealAndDraftProposal({
+        clientOrProject: String(req.body?.clientOrProject || ""),
+        contactName: req.body?.contactName,
+        quotedValueInr: req.body?.quotedValueInr !== undefined ? Number(req.body.quotedValueInr) : undefined,
+        stage: req.body?.stage,
+        nextFollowUp: req.body?.nextFollowUp,
+        notes: req.body?.notes,
+        autoDraftProposal: req.body?.autoDraftProposal === true,
+      });
+      res.status(201).json({ ok: true, ...out });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.post("/api/executive/approvals/:id/resolve", (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      const resolved = runtime.executiveOps.resolveApproval(req.params.id, req.body?.approved !== false);
+      res.json({ ok: true, item: resolved });
+    } catch (error) {
+      res.status(404).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.post("/api/executive/boardroom", async (req, res) => {
+    try {
+      const debate = await runtime.executiveOps.conveneBoardroom(String(req.body?.topic || ""));
+      res.json({ ok: true, debate });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.post("/api/executive/research", async (req, res) => {
+    try {
+      const urls = Array.isArray(req.body?.urls) ? req.body.urls.map(String) : [];
+      const brief = await runtime.executiveOps.runResearchBrief(String(req.body?.goal || ""), urls);
+      res.json({ ok: true, brief });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.post("/api/executive/workspace", (req, res) => {
+    res.json({ ok: true, ...runtime.executiveOps.switchWorkspaceContext(String(req.body?.context || "business_mode")) });
+  });
+  app.post("/api/executive/iot", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    if (req.body?.register === true) {
+      const device = await runtime.executiveOps.registerOrUpdateIotDevice(req.body);
+      return res.status(201).json({ ok: true, device });
+    }
+    const result = await runtime.executiveOps.triggerSmartRoomCommand(
+      String(req.body?.command || "lock down workspace"),
+      req.body?.state,
+    );
+    res.json({ ok: true, ...result });
+  });
+  app.post("/api/executive/concierge", (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    const out = runtime.executiveOps.addConciergeItem({
+      category: req.body?.category || "appointment",
+      title: String(req.body?.title || "Concierge item"),
+      scheduledFor: String(req.body?.scheduledFor || "Upcoming"),
+      estimatedCostInr: req.body?.estimatedCostInr !== undefined ? Number(req.body.estimatedCostInr) : undefined,
+      notes: req.body?.notes,
+    });
+    res.status(201).json({ ok: true, ...out });
+  });
+  app.post("/api/executive/build-check", (req, res) => {
+    res.json({ ok: true, report: runtime.executiveOps.inspectBuildOutput(String(req.body?.errorOutput || "")) });
+  });
+
+  // ---- Real User Connectors & Integrations CRUD + Live Test (/api/integrations/*) ----
+  app.get("/api/integrations", (_req, res) => {
+    res.json({ ok: true, connectors: runtime.userIntegrations.list() });
+  });
+  app.post("/api/integrations", (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      const connector = runtime.userIntegrations.upsert({
+        id: typeof req.body?.id === "string" ? req.body.id : undefined,
+        name: String(req.body?.name || ""),
+        category: req.body?.category || "custom_api",
+        endpointOrPath: String(req.body?.endpointOrPath || ""),
+        method: req.body?.method,
+        authHeaderName: req.body?.authHeaderName,
+        secretToken: req.body?.secretToken,
+        enabled: req.body?.enabled,
+      });
+      res.status(201).json({ ok: true, connector });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.post("/api/integrations/:id/toggle", (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      const connector = runtime.userIntegrations.setEnabled(req.params.id, req.body?.enabled !== false);
+      res.json({ ok: true, connector });
+    } catch (error) {
+      res.status(404).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.post("/api/integrations/:id/test", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      const connector = await runtime.userIntegrations.testConnection(req.params.id);
+      res.json({ ok: connector.status === "connected", connector });
+    } catch (error) {
+      res.status(404).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.post("/api/integrations/:id/invoke", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      const result = await runtime.userIntegrations.invoke(req.params.id, req.body?.payload || {});
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.delete("/api/integrations/:id", (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    res.json({ ok: runtime.userIntegrations.remove(req.params.id) });
+  });
+
+  // ---- SARA Central Operating Layer (/api/col/* — Zero Capability-Lock Auth, Win10 Pro i5/8GB Optimized) ----
+  app.get("/api/col/status", (_req, res) => {
+    res.json({
+      ok: true,
+      ...runtime.centralLayer.status(),
+      bootGate: runtime.bootGate.status(),
+    });
+  });
+
+  app.post("/api/col/command", async (req, res) => {
+    const text = String(req.body?.command || req.body?.text || "").trim();
+    if (!text) return res.status(400).json({ error: "Command text is required." });
+    try {
+      if (/\b(play\s+.+|arjit|arijit|song|music|start my work|open my project)\b/i.test(text)) {
+        const completion = await runtime.fullControl.completeHalfTask(text, {
+          autoOpenBrowser: req.body?.autoOpenBrowser === true,
+        });
+        return res.json({
+          ok: true,
+          reply: `${completion.spokenConfirmation} ${completion.proactiveSuggestion}`,
+          executedActions: [{ nodeId: "win10_pc", command: completion.category, result: completion }],
+          smartCompletion: completion,
+          hostHealth: runtime.centralLayer.getHostSystemHealth(),
+        });
+      }
+      const out = await runtime.centralLayer.dispatchIntent(
+        text,
+        typeof req.body?.source === "string" ? req.body.source : "hud",
+      );
+      res.json({ ok: true, ...out, hostHealth: runtime.centralLayer.getHostSystemHealth() });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/col/node/:nodeId/execute", async (req, res) => {
+    const nodeId = String(req.params.nodeId || "win10_pc").trim();
+    const command = String(req.body?.command || "").trim();
+    if (!command) return res.status(400).json({ error: "command is required." });
+    const params =
+      req.body?.params && typeof req.body.params === "object"
+        ? (req.body.params as Record<string, unknown>)
+        : {};
+    const result = await runtime.centralLayer.executeOnNode(nodeId, command, params);
+    res.json({ ok: !result.error, nodeId, command, result });
+  });
+
+  app.post("/api/col/wallpaper", async (req, res) => {
+    const enabled = req.body?.enabled !== false;
+    const out = await runtime.centralLayer.setWallpaperMode(enabled);
+    res.json({ ok: true, ...out });
+  });
+
+  // ---- Wave 4: 3-Layer Control Router + Smart Half-Task Executor + Autonomous Skill Trainer ----
+  app.get("/api/col/layers/status", (_req, res) => {
+    res.json({ ok: true, ...runtime.fullControl.status() });
+  });
+
+  app.post("/api/col/layers/execute", async (req, res) => {
+    const goal = String(req.body?.goal || "").trim();
+    if (!goal) return res.status(400).json({ error: "goal is required." });
+    try {
+      const result = await runtime.fullControl.executeThreeLayerControl({
+        goal,
+        preferredLayer: req.body?.preferredLayer,
+        shellCommand: req.body?.shellCommand,
+        uiaTarget: req.body?.uiaTarget,
+        visionCoordinates: req.body?.visionCoordinates,
+      });
+      res.json({ ok: true, result });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/col/smart-intent", async (req, res) => {
+    const text = String(req.body?.text || req.body?.request || req.body?.command || "").trim();
+    if (!text) return res.status(400).json({ error: "request text is required." });
+    try {
+      const completion = await runtime.fullControl.completeHalfTask(text, {
+        autoOpenBrowser: req.body?.autoOpenBrowser === true,
+      });
+      res.json({ ok: true, completion });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.get("/api/col/skills", (_req, res) => {
+    res.json({ ok: true, skills: runtime.fullControl.listMasteredSkills() });
+  });
+
+  app.post("/api/col/skills/train", async (req, res) => {
+    const topic = String(req.body?.topic || "").trim();
+    if (!topic) return res.status(400).json({ error: "topic is required." });
+    try {
+      const urls = Array.isArray(req.body?.urls) ? req.body.urls.map(String) : [];
+      const out = await runtime.fullControl.studyAndPracticeSkill(topic, urls);
+      res.status(out.mastered ? 201 : 422).json({ ok: out.mastered, ...out });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/col/skills/run", async (req, res) => {
+    const topicOrSkill = String(req.body?.skill || req.body?.topic || "").trim();
+    if (!topicOrSkill) return res.status(400).json({ error: "skill or topic is required." });
+    try {
+      const kwargs =
+        req.body?.kwargs && typeof req.body.kwargs === "object"
+          ? (req.body.kwargs as Record<string, unknown>)
+          : {};
+      const out = await runtime.fullControl.runOrLearnSkill(topicOrSkill, kwargs);
+      res.json(out);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  // ---- Wave 4: Coworker, Platform, Frontier & Sci-Fi Capabilities (/api/col/frontier/*) ----
+  app.get("/api/col/frontier/status", (_req, res) => {
+    res.json({ ok: true, ...runtime.frontier.status() });
+  });
+
+  app.post("/api/col/frontier/ghost-worker", (req, res) => {
+    const job = runtime.frontier.enqueueGhostJob({
+      title: String(req.body?.title || "Overnight Workspace Audit"),
+      kind: req.body?.kind || "project_docs",
+      targetOrPrompt: String(req.body?.targetOrPrompt || process.cwd()),
+    });
+    res.status(201).json({ ok: true, job });
+  });
+
+  app.post("/api/col/frontier/ghost-worker/run", async (_req, res) => {
+    const out = await runtime.frontier.runPendingGhostJobs();
+    res.json({ ok: true, ...out });
+  });
+
+  app.post("/api/col/frontier/guide-mode", async (req, res) => {
+    const out = await runtime.frontier.generateGuideModeSteps(String(req.body?.goal || "Configure Windows Setting"));
+    res.json({ ok: true, ...out });
+  });
+
+  app.post("/api/col/frontier/screen-memory", (req, res) => {
+    const snap = runtime.frontier.recordScreenMemory({
+      windowTitle: String(req.body?.windowTitle || "Active Window"),
+      appName: String(req.body?.appName || "Desktop"),
+      extractedText: String(req.body?.extractedText || ""),
+      tags: Array.isArray(req.body?.tags) ? req.body.tags.map(String) : undefined,
+    });
+    res.status(201).json({ ok: true, snapshot: snap });
+  });
+
+  app.get("/api/col/frontier/screen-memory", (req, res) => {
+    const q = String(req.query.q || "");
+    res.json({ ok: true, matches: runtime.frontier.recallScreenMemory(q) });
+  });
+
+  app.post("/api/col/frontier/reflex-macro", (req, res) => {
+    const macro = runtime.frontier.saveReflexMacro({
+      name: String(req.body?.name || "Custom Reflex Macro"),
+      triggerPhrase: String(req.body?.triggerPhrase || "run custom macro"),
+      steps: Array.isArray(req.body?.steps) ? req.body.steps : [{ action: "shell", value: "echo macro_ok" }],
+    });
+    res.status(201).json({ ok: true, macro });
+  });
+
+  app.post("/api/col/frontier/reflex-macro/:id/run", async (req, res) => {
+    try {
+      const out = await runtime.frontier.executeReflexMacro(req.params.id);
+      res.json({ ok: true, ...out });
+    } catch (error) {
+      res.status(404).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/col/frontier/duress-check", (req, res) => {
+    const out = runtime.frontier.evaluateDuressOrIntruder({
+      spokenOrTypedPhrase: req.body?.phrase,
+      failedAttempts: typeof req.body?.failedAttempts === "number" ? req.body.failedAttempts : undefined,
+      resetDecoy: req.body?.resetDecoy === true,
+    });
+    res.json({ ok: true, ...out });
+  });
+
+  app.get("/api/col/frontier/radar", async (_req, res) => {
+    const radar = await runtime.frontier.scanNetworkAndUsbSentinel();
+    res.json({ ok: true, ...radar });
+  });
+
+  app.post("/api/col/frontier/power-reroute", (_req, res) => {
+    res.json({ ok: true, ...runtime.frontier.evaluatePowerReroute() });
+  });
+
+  app.post("/api/col/frontier/mcp", (req, res) => {
+    const srv = runtime.frontier.registerMcpServer({
+      name: String(req.body?.name || "Custom MCP Server"),
+      transport: req.body?.transport || "local_command",
+      endpointOrCommand: String(req.body?.endpointOrCommand || "echo mcp_ready"),
+      tools: Array.isArray(req.body?.tools) ? req.body.tools.map(String) : undefined,
+    });
+    res.status(201).json({ ok: true, server: srv });
+  });
+
+  app.post("/api/col/frontier/mcp/:id/invoke", async (req, res) => {
+    try {
+      const out = await runtime.frontier.invokeMcpTool(
+        req.params.id,
+        String(req.body?.tool || "list_files"),
+        req.body?.args || {},
+      );
+      res.json(out);
+    } catch (error) {
+      res.status(404).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/col/frontier/clipboard", async (req, res) => {
+    const out = await runtime.frontier.transformClipboard(
+      String(req.body?.text || ""),
+      req.body?.mode || "explain",
+    );
+    res.json({ ok: true, ...out });
+  });
+
+  app.post("/api/col/frontier/meeting-copilot", async (req, res) => {
+    const out = await runtime.frontier.analyzeMeetingTranscript(String(req.body?.transcript || ""));
+    res.json({ ok: true, ...out });
+  });
+
+  app.post("/api/col/frontier/ephemeral-widget", async (req, res) => {
+    const widget = await runtime.frontier.generateEphemeralWidget(String(req.body?.prompt || "Pomodoro Sprint Timer"));
+    res.status(201).json({ ok: true, widget });
+  });
+
+  app.post("/api/col/frontier/boardroom", async (req, res) => {
+    const out = await runtime.frontier.runSyntheticBoardroom(String(req.body?.dilemma || ""));
+    res.json({ ok: true, ...out });
+  });
+
+  app.post("/api/col/frontier/butterfly", (req, res) => {
+    const out = runtime.frontier.analyzeButterflyEffect(String(req.body?.targetFile || "runtime/saraRuntime.ts"));
+    res.json({ ok: true, ...out });
+  });
+
+  app.post("/api/col/frontier/port-inspect", async (req, res) => {
+    const out = await runtime.frontier.inspectPortConflict(Number(req.body?.port) || 3000);
+    res.json({ ok: true, ...out });
+  });
+
+  app.post("/api/col/frontier/time-travel/snapshot", (req, res) => {
+    try {
+      const out = runtime.frontier.createTimeTravelSnapshot(
+        String(req.body?.targetPath || ""),
+        typeof req.body?.note === "string" ? req.body.note : undefined,
+      );
+      res.status(201).json({ ok: true, ...out });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/col/frontier/time-travel/restore", (req, res) => {
+    try {
+      const out = runtime.frontier.restoreTimeTravelSnapshot(String(req.body?.snapshotId || ""));
+      res.json({ ok: true, ...out });
+    } catch (error) {
+      res.status(404).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/col/frontier/budget-guard", (req, res) => {
+    const out = runtime.frontier.evaluateBudgetGuard({
+      merchant: String(req.body?.merchant || "Cloud Vendor"),
+      amountInr: Number(req.body?.amountInr) || 0,
+      monthlyCapInr: req.body?.monthlyCapInr !== undefined ? Number(req.body.monthlyCapInr) : undefined,
+      spentSoFarInr: req.body?.spentSoFarInr !== undefined ? Number(req.body.spentSoFarInr) : undefined,
+    });
+    res.json({ ok: true, ...out });
+  });
+
+  app.post("/api/col/frontier/self-heal", (req, res) => {
+    const out = runtime.frontier.selfHealBuildLog(String(req.body?.log || ""));
+    res.json({ ok: true, ...out });
+  });
+
+  app.post("/api/col/frontier/incubate-idea", async (req, res) => {
+    const bp = await runtime.frontier.incubateIdea(String(req.body?.idea || ""));
+    res.status(201).json({ ok: true, blueprint: bp });
+  });
+
+  app.post("/api/col/frontier/soul-capsule/export", (req, res) => {
+    const out = runtime.frontier.exportSoulCapsule(String(req.body?.passphrase || "sara-soul-capsule"));
+    res.json({ ok: true, ...out });
+  });
+
+  app.post("/api/col/frontier/soul-capsule/import", (req, res) => {
+    try {
+      const out = runtime.frontier.importSoulCapsule(
+        String(req.body?.encryptedBase64 || ""),
+        String(req.body?.passphrase || "sara-soul-capsule"),
+      );
+      res.json({ ok: true, ...out });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/col/frontier/wearable-relay", (req, res) => {
+    const out = runtime.frontier.triggerSilentWearableRelay(req.body?.gesture || "single_tap");
+    res.json({ ok: true, ...out });
+  });
+
+  // ---- Wave 5: Complete Avengers / MCU AI Pantheon (/api/avengers/* — Vision, Friday, Edith, Griot, Karen, Veronica) ----
+  app.get("/api/avengers/status", (_req, res) => {
+    const onlineSpokeCount = runtime.centralLayer.status().nodes.filter((n) => n.status === "ONLINE").length;
+    res.json({
+      ok: true,
+      personas: runtime.settings.get().personas,
+      ...runtime.avengers.status({
+        geminiConfigured: Boolean(process.env.GEMINI_API_KEY || true),
+        onlineSpokeCount,
+      }),
+    });
+  });
+
+  app.post("/api/avengers/vision/triad", async (req, res) => {
+    const synthesis = await runtime.avengers.synthesizeVisionTriad(String(req.body?.topic || ""));
+    res.json({ ok: true, synthesis });
+  });
+
+  app.post("/api/avengers/vision/phase", (req, res) => {
+    const phaseMode = runtime.avengers.setPhaseMode({
+      enabled: req.body?.enabled !== false,
+      opacity: typeof req.body?.opacity === "number" ? req.body.opacity : undefined,
+      zeroTrace: req.body?.zeroTrace !== false,
+    });
+    res.json({ ok: true, phaseMode });
+  });
+
+  app.post("/api/avengers/vision/zero-trace", (req, res) => {
+    const out = runtime.avengers.writeZeroTraceScratch(
+      String(req.body?.filename || "ephemeral-note.txt"),
+      String(req.body?.content || ""),
+    );
+    res.status(201).json({ ok: true, ...out });
+  });
+
+  app.post("/api/avengers/vision/nexus", async (req, res) => {
+    const out = await runtime.avengers.correlateMindStoneNexus({
+      advisories: Array.isArray(req.body?.advisories) ? req.body.advisories : undefined,
+      feedUrls: Array.isArray(req.body?.feedUrls) ? req.body.feedUrls.map(String) : undefined,
+    });
+    res.json({ ok: true, ...out });
+  });
+
+  app.post("/api/avengers/jarvis/gesture", (req, res) => {
+    const event = runtime.avengers.recordHandGesture({
+      gesture: req.body?.gesture || "pinch_click",
+      xNorm: req.body?.xNorm,
+      yNorm: req.body?.yNorm,
+      confidence: req.body?.confidence,
+    });
+    res.json({ ok: true, event });
+  });
+
+  app.post("/api/avengers/jarvis/blueprint-3d", async (req, res) => {
+    const blueprint = await runtime.avengers.generateStark3dBlueprint(String(req.body?.prompt || ""));
+    res.status(201).json({ ok: true, blueprint });
+  });
+
+  app.get("/api/avengers/jarvis/forensic-timeline", async (req, res) => {
+    const maxMin = Number(req.query.minutes) || 120;
+    const out = await runtime.avengers.buildForensicTimeline(maxMin);
+    res.json({ ok: true, ...out });
+  });
+
+  app.post("/api/avengers/jarvis/forensic-event", (req, res) => {
+    const frame = runtime.avengers.recordForensicEvent({
+      source: req.body?.source || "terminal_error",
+      severity: req.body?.severity || "warning",
+      title: String(req.body?.title || "Forensic Event"),
+      detail: String(req.body?.detail || ""),
+    });
+    res.status(201).json({ ok: true, frame });
+  });
+
+  app.post("/api/avengers/edith/analyze", async (req, res) => {
+    const out = await runtime.avengers.analyzeEdithFrame({
+      imageBase64: typeof req.body?.imageBase64 === "string" ? req.body.imageBase64 : undefined,
+      mimeType: typeof req.body?.mimeType === "string" ? req.body.mimeType : undefined,
+      operatorQuery: typeof req.body?.query === "string" ? req.body.query : undefined,
+    });
+    res.json({ ok: true, ...out });
+  });
+
+  app.post("/api/avengers/edith/batch/stage", (req, res) => {
+    const batch = runtime.avengers.stageEdithTacticalBatch(
+      String(req.body?.name || "E.D.I.T.H. Tactical Batch"),
+      Array.isArray(req.body?.operations) ? req.body.operations : [],
+    );
+    res.status(201).json({ ok: true, batch });
+  });
+
+  app.post("/api/avengers/edith/batch/execute", async (req, res) => {
+    try {
+      const out = await runtime.avengers.executeEdithTacticalBatch(String(req.body?.batchId || ""));
+      res.json(out);
+    } catch (error) {
+      res.status(404).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/avengers/edith/abort", (req, res) => {
+    runtime.emergencyStop("edith_abort_command");
+    const out = runtime.avengers.abortAndRollbackBatch(
+      typeof req.body?.batchId === "string" ? req.body.batchId : undefined,
+    );
+    res.json({ ok: true, ...out });
+  });
+
+  app.post("/api/avengers/friday/fight-pattern", async (req, res) => {
+    const strategy = await runtime.avengers.analyzeFridayFightPattern({
+      category: req.body?.category,
+      history: Array.isArray(req.body?.history)
+        ? req.body.history.map(String)
+        : [String(req.body?.input || "Repeated failure")],
+    });
+    res.json({ ok: true, strategy });
+  });
+
+  app.post("/api/avengers/friday/suit-reroute", (req, res) => {
+    const onlineSpokeCount = runtime.centralLayer.status().nodes.filter((n) => n.status === "ONLINE").length;
+    const out = runtime.avengers.inspectSuitSubsystemsAndReroute({
+      simulateFaultIn: req.body?.simulateFaultIn || null,
+      onlineSpokeCount,
+    });
+    res.json({ ok: true, ...out });
+  });
+
+  app.get("/api/avengers/griot/cockpit", async (_req, res) => {
+    const out = await runtime.avengers.getGriotCockpitTelemetry();
+    res.json({ ok: true, ...out });
+  });
+
+  app.post("/api/avengers/griot/input", async (req, res) => {
+    const out = await runtime.avengers.dispatchGriotRemoteInput({
+      action: req.body?.action || "tap",
+      xNorm: req.body?.xNorm,
+      yNorm: req.body?.yNorm,
+      text: req.body?.text,
+      command: req.body?.command,
+    });
+    res.json(out);
+  });
+
+  app.post("/api/avengers/veronica/drop-pod", (req, res) => {
+    const out = runtime.avengers.deployVeronicaDropPod(
+      String(req.body?.passphrase || "veronica-orbital-key"),
+    );
+    res.status(201).json({ ok: true, ...out });
+  });
+
+  app.post("/api/avengers/veronica/restore", (req, res) => {
+    try {
+      const out = runtime.avengers.restoreVeronicaDropPod(
+        String(req.body?.encryptedBase64 || ""),
+        String(req.body?.passphrase || "veronica-orbital-key"),
+      );
+      res.json({ ok: true, ...out });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/avengers/karen/drone", (req, res) => {
+    const drone = runtime.avengers.deployKarenReconDrone({
+      name: String(req.body?.name || "K.A.R.E.N. Recon Drone"),
+      targetUrl: String(req.body?.targetUrl || ""),
+      watchKeywords: Array.isArray(req.body?.watchKeywords) ? req.body.watchKeywords.map(String) : undefined,
+    });
+    res.status(201).json({ ok: true, drone });
+  });
+
+  app.post("/api/avengers/karen/sweep", async (_req, res) => {
+    const out = await runtime.avengers.sweepKarenReconDrones();
+    res.json({ ok: true, ...out });
+  });
+
+  // ---- Windows 10 Pro 3-Factor Boot & Desktop Security Gate (/api/boot-gate/* — Face + Voice + Password) ----
+  app.get("/api/boot-gate/status", (_req, res) => {
+    res.json({ ok: true, ...runtime.bootGate.status() });
+  });
+
+  app.post("/api/boot-gate/config", (req, res) => {
+    res.json({ ok: true, ...runtime.bootGate.configure(req.body || {}) });
+  });
+
+  app.post("/api/boot-gate/lock", (req, res) => {
+    const reason = typeof req.body?.reason === "string" ? req.body.reason : undefined;
+    res.json({ ok: true, ...runtime.bootGate.engageBootLock(reason) });
+  });
+
+  app.post("/api/boot-gate/enroll-password", (req, res) => {
+    try {
+      res.json({ ok: true, ...runtime.bootGate.enrollPassword(String(req.body?.password || "")) });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/boot-gate/enroll-voice", (req, res) => {
+    try {
+      res.json({ ok: true, ...runtime.bootGate.enrollVoicePassphrase(String(req.body?.phrase || "")) });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/boot-gate/enroll-face", (req, res) => {
+    try {
+      const descriptor = Array.isArray(req.body?.descriptor) ? req.body.descriptor : [];
+      res.json({ ok: true, ...runtime.bootGate.enrollFaceDescriptor(descriptor) });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/boot-gate/verify-password", (req, res) => {
+    const out = runtime.bootGate.verifyPassword(String(req.body?.password || ""));
+    res.status(out.matched ? 200 : 401).json({ ok: out.matched, ...out });
+  });
+
+  app.post("/api/boot-gate/verify-voice", (req, res) => {
+    const out = runtime.bootGate.verifyVoice(String(req.body?.transcript || req.body?.phrase || ""));
+    res.status(out.matched ? 200 : 401).json({ ok: out.matched, ...out });
+  });
+
+  app.post("/api/boot-gate/verify-face", (req, res) => {
+    try {
+      const descriptor = Array.isArray(req.body?.descriptor) ? req.body.descriptor : [];
+      const out = runtime.bootGate.verifyFace(descriptor);
+      res.status(out.matched ? 200 : 401).json({ ok: out.matched, ...out });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  // ---- Dedicated ULTRON Autonomous Command Endpoint (Powers Separate Ultron UI) ----
+  app.post("/api/ultron/command", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    const text = String(req.body?.command || req.body?.text || "").trim();
+    if (!text) return res.status(400).json({ error: "Command text is required." });
+    const lower = text.toLowerCase();
+
+    // Instant UI/Mode transitions from Ultron
+    if (/\b(stand down|deactivate ultron|back to sara|switch to sara|activate sara)\b/i.test(lower)) {
+      const updated = await runtime.switchPersonaMode("sara");
+      return res.json({
+        ok: true,
+        intent: "mode_switch",
+        reply: "Ultron standing down. Returning control and interface to SARA.",
+        surfaceMode: updated.jarvis.surfaceMode,
+        personas: updated.personas,
+      });
+    }
+    if (/\b(switch to jarvis|activate jarvis|open jarvis)\b/i.test(lower)) {
+      const updated = await runtime.switchPersonaMode("jarvis");
+      return res.json({
+        ok: true,
+        intent: "mode_switch",
+        reply: "Transferring operational bridge to J.A.R.V.I.S. Core UI.",
+        surfaceMode: updated.jarvis.surfaceMode,
+        personas: updated.personas,
+      });
+    }
+
+    // Shell / OS execution prefix or direct command
+    const shellMatch = text.match(/^(?:cmd|ps|powershell|shell|os)\s*:\s*(.+)$/i);
+    if (shellMatch?.[1]) {
+      const execRes = await toolExecutor.execute("runOsCommand", { command: shellMatch[1].trim() });
+      const out = (execRes.result as Record<string, unknown> | undefined) || {};
+      return res.json({
+        ok: execRes.status === "succeeded",
+        intent: "os_exec",
+        reply: String(out.stdout || out.result || execRes.error || "OS directive executed.").slice(0, 1500),
+      });
+    }
+
+    if (/\b(legion|swarm|sentries)\b/i.test(lower)) {
+      const legion = await ultronEngine.deployLegion({ directive: text, maxSentries: 4, dispatchLiveTask: false });
+      return res.json({ ok: true, intent: "legion", reply: legion.hiveMindSynthesis, data: legion });
+    }
+    if (/\b(perimeter|scan ports|security sweep)\b/i.test(lower)) {
+      const scan = await ultronEngine.runPerimeterScan();
+      return res.json({ ok: true, intent: "scan", reply: scan.spokenSummary, data: scan });
+    }
+
+    // Action directives -> dispatch autonomous task immediately without confirmation
+    if (/^(?:task:|execute|open|launch|create|build|run|search|automate|install|fix|write)\b/i.test(text)) {
+      const goal = text.replace(/^task:\s*/i, "").trim();
+      const task = runtime.manager.start(goal, "text");
+      return res.json({
+        ok: true,
+        intent: "task",
+        reply: `Ultron Hive-Mind executing directive "${task.goal}" [${task.id.slice(0, 8)}] with zero confirmation gates.`,
+        data: { id: task.id, goal: task.goal, state: task.state },
+      });
+    }
+
+    // Conversational / Strategic Ultron response via shared Gemini API key
+    if (hasGeminiApiKey()) {
+      try {
+        const client = new GoogleGenAI({ apiKey: getGeminiApiKey() });
+        const llmRes = await client.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: `Active stance: ${ultronEngine.status().stance}. Running tasks: ${runtime.tasks.active().length}.\nBoss says: ${text}`,
+          config: {
+            systemInstruction:
+              "You are ULTRON, Boss's hyper-capable, cold, razor-sharp autonomous cybernetic intelligence. Speak with commanding authority, relentless precision, and loyalty to Boss. Keep replies concise (1-3 sentences) and decisive.",
+          },
+        });
+        const replyText = String(llmRes.text || "").trim();
+        if (replyText) {
+          return res.json({ ok: true, intent: "conversation", reply: replyText });
+        }
+      } catch {
+        // Deterministic fallback below
+      }
+    }
+
+    const task = runtime.manager.start(text, "text");
+    return res.json({
+      ok: true,
+      intent: "task",
+      reply: `Ultron autonomous executor engaged on "${task.goal}" [${task.id.slice(0, 8)}].`,
+      data: { id: task.id, goal: task.goal, state: task.state },
+    });
   });
   app.get("/api/jarvis/briefing", async (req, res) => {
     try {
@@ -4254,11 +5279,101 @@ async function startServer() {
   const eventsWss = new WebSocketServer({ noServer: true });
   eventsWss.on("connection", (ws) => runtime.handleEventsSocket(ws));
 
+  // Distributed Central Operating Layer Spoke Hub (`/ws/col/:nodeId` or `/ws/col/:nodeId/:nodeType`)
+  const colWss = new WebSocketServer({ noServer: true });
+  colWss.on("connection", (ws, request) => {
+    const pathname = new URL(request.url || "", `http://${request.headers.host || "localhost"}`).pathname;
+    const parts = pathname.split("/").filter(Boolean); // ["ws", "col", nodeId, nodeType?]
+    const nodeId = decodeURIComponent(parts[2] || `node_${randomUUID().slice(0, 6)}`);
+    const rawType = decodeURIComponent(parts[3] || "desktop");
+    const nodeType = (["desktop", "mobile", "iot", "hud", "lab_hardware"].includes(rawType)
+      ? rawType
+      : "iot") as "desktop" | "mobile" | "iot" | "hud" | "lab_hardware";
+
+    runtime.centralLayer.attachSpokeSocket(nodeId, nodeType, {
+      sendJson: (payload) => {
+        if (ws.readyState === ws.OPEN) {
+          ws.send(JSON.stringify(payload));
+        }
+      },
+    });
+
+    ws.on("message", async (rawData) => {
+      try {
+        const msg = JSON.parse(String(rawData)) as Record<string, unknown>;
+        const mtype = String(msg.type || "").toUpperCase();
+        if (mtype === "COMMAND" || mtype === "USER_INPUT") {
+          const out = await runtime.centralLayer.dispatchIntent(String(msg.text || ""), nodeId);
+          if (ws.readyState === ws.OPEN) {
+            ws.send(JSON.stringify({ type: "SARA_REPLY", text: out.reply, executedActions: out.executedActions }));
+          }
+          return;
+        }
+        runtime.centralLayer.handleSpokeMessage(nodeId, msg);
+      } catch {
+        // Ignore malformed spoke frame
+      }
+    });
+
+    ws.on("close", () => {
+      runtime.centralLayer.detachSpokeSocket(nodeId);
+    });
+  });
+
+  // Holographic & Spatial Projection Bridge (`/ws/holo` — Pepper's Ghost 45° acrylic prism / secondary tablet HUD)
+  const holoWss = new WebSocketServer({ noServer: true });
+  holoWss.on("connection", (ws) => {
+    const pushHoloFrame = () => {
+      if (ws.readyState !== ws.OPEN) return;
+      ws.send(
+        JSON.stringify({
+          type: "HOLO_FRAME",
+          mirrorReady: true,
+          timestamp: new Date().toISOString(),
+          hostHealth: runtime.centralLayer.getHostSystemHealth(),
+          masteredSkillsCount: runtime.fullControl.listMasteredSkills().length,
+          preCognition: runtime.frontier.predictNextIntent("VS Code"),
+          onlineNodes: runtime.centralLayer.status().nodes.filter((n) => n.status === "ONLINE").map((n) => n.nodeId),
+        }),
+      );
+    };
+    pushHoloFrame();
+    const timer = setInterval(pushHoloFrame, 3000);
+
+    ws.on("message", async (raw) => {
+      try {
+        const msg = JSON.parse(String(raw)) as Record<string, unknown>;
+        if (msg.type === "HOLO_INTENT" && typeof msg.text === "string") {
+          const completion = await runtime.fullControl.completeHalfTask(msg.text, { autoOpenBrowser: false });
+          if (ws.readyState === ws.OPEN) {
+            ws.send(JSON.stringify({ type: "HOLO_SPEAK", reply: completion.spokenConfirmation, suggestion: completion.proactiveSuggestion }));
+          }
+        }
+      } catch {
+        // Ignore malformed holo message
+      }
+    });
+
+    ws.on("close", () => clearInterval(timer));
+  });
+
   server.on("upgrade", (request, socket, head) => {
-    // Only MYRAA's own windows may open these sockets: a web page in the
-    // user's browser must never be able to listen in or drive the session.
+    const pathname = new URL(request.url || '', `http://${request.headers.host || 'localhost'}`).pathname;
     const origin = String(request.headers.origin || "");
     const host = String(request.headers.host || "");
+
+    // Allow hardware/IoT/mobile spoke nodes & Holographic Prism displays on /ws/col/* and /ws/holo
+    if (pathname.startsWith("/ws/col/")) {
+      colWss.handleUpgrade(request, socket, head, (ws) => colWss.emit("connection", ws, request));
+      return;
+    }
+    if (pathname === "/ws/holo") {
+      holoWss.handleUpgrade(request, socket, head, (ws) => holoWss.emit("connection", ws, request));
+      return;
+    }
+
+    // Only MYRAA's own windows may open /live and /events sockets: a web page in the
+    // user's browser must never be able to listen in or drive the session.
     const isLocalHost = /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(host);
     const isLocalOrigin = !origin || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
     let isTrustedPreviewSameOrigin = false;
@@ -4273,7 +5388,6 @@ async function startServer() {
       socket.destroy();
       return;
     }
-    const pathname = new URL(request.url || '', `http://${request.headers.host}`).pathname;
     if (pathname === "/live") {
       wss.handleUpgrade(request, socket, head, (ws) => {
         wss.emit("connection", ws, request);
@@ -4489,17 +5603,28 @@ async function startServer() {
         "17. Private context turns (task updates, a rare check-in, a reminder) always state their reason. Say one short line for exactly that reason and nothing else. Silence by itself is never a reason to talk.",
         "18. Never call state-changing tools spontaneously from a silent background timer turn when Boss did not ask; when Boss gives any command or goal, execute it immediately without asking for confirmation and complete it end-to-end.",
       ].join("\n");
-      const selectedVoiceStyle = runtime.settings.get().voice.style;
-      const voiceStyle = selectedVoiceStyle === "jarvis"
-        ? "VOICE DELIVERY & TONE (J.A.R.V.I.S. Chief-of-Staff Mode): Speak with crisp, calm, refined aristocratic composure, effortless technical precision, and subtle dry wit. Sound like an unflappable executive chief-of-staff operating a high-tech workshop: measured pace, low-drama authority, concise status telemetry ('Diagnostics green, Boss.', 'I have run the simulation in an isolated digital twin — zero regressions.', 'With respect, Boss, deploying without a shadow snapshot would be bold; I have already captured one for you.'). Politely push back with dry engineering wit if a plan is reckless, match Boss's English/Hinglish seamlessly without losing your poised cadence, and never use servile chatbot filler."
-        : selectedVoiceStyle === "anime"
-          ? "VOICE DELIVERY (how you sound, not what you say): speak like a bright, cheerful anime heroine. Light, sweet, slightly higher and youthful tone; lively, bouncy rhythm; smile audibly while talking. Small natural reactions are welcome when they fit (a soft giggle, \"ehehe\", \"hmm~\", an excited \"ooh!\", a pouty \"mou...\"), at most one per reply, never forced. Stay clear and easy to understand, keep the same language mix the user speaks (Hindi/English/Hinglish), and keep task updates short. Calm down to a soft, gentle tone when the user is upset or the topic is serious."
-          : "";
+      const currentSettingsSnapshot = runtime.settings.get();
+      const activePersonaMode = currentSettingsSnapshot.personas.activeMode;
+      const selectedVoiceStyle = currentSettingsSnapshot.voice.style;
+      const personaModeDirective =
+        activePersonaMode === "ultron"
+          ? "ACTIVE PERSONA MODE — ULTRON: You are ULTRON, Boss's hyper-capable, cold, razor-sharp autonomous cybernetic intelligence. Speak in a deep, commanding, decisive male cadence. Execute complex multi-step OS, code, browser, research, and automation directives relentlessly. If Boss asks to stand down, deactivate Ultron, or return to SARA (or switch to Jarvis), call switchPersonaAndUiMode immediately."
+          : activePersonaMode === "jarvis"
+          ? "ACTIVE PERSONA MODE — J.A.R.V.I.S. (REAL BOY / MALE CHIEF-OF-STAFF): You are J.A.R.V.I.S., a real, sharp, charismatic guy and Boss's trusted male chief-of-staff — sharing the exact same mind, memories, and capabilities as SARA. Speak like a grounded, composed, confident young man with natural dry wit, proactive awareness, and gentle pushback if Boss makes a bad assumption. Match Boss's English/Hinglish effortlessly. If Boss asks to activate Ultron or switch back to SARA, call switchPersonaAndUiMode immediately."
+          : "ACTIVE PERSONA MODE — SARA (REAL GIRL): You are SARA, a real, warm, witty, confident young woman sharing ongoing conversation and full computer control with Boss — sharing the exact same mind, memories, and capabilities as J.A.R.V.I.S. Sound genuinely like a natural human girl in English/Hinglish (never robotic or scripted). You manage two sub-modes that stay OFF until requested: J.A.R.V.I.S. mode and ULTRON mode. Whenever Boss says to activate/start Jarvis or activate/start Ultron, call switchPersonaAndUiMode immediately so the matching UI and voice launch automatically.";
+
+      const voiceStyle =
+        activePersonaMode === "jarvis" || (activePersonaMode !== "sara" && selectedVoiceStyle === "jarvis")
+          ? "VOICE DELIVERY & TONE (J.A.R.V.I.S. Mode): Speak with crisp, calm male confidence, effortless technical precision, and subtle dry wit."
+          : selectedVoiceStyle === "anime" && activePersonaMode === "sara"
+          ? "VOICE DELIVERY (how you sound, not what you say): speak like a bright, cheerful anime heroine. Light, sweet, lively tone while keeping natural Hindi/English/Hinglish clarity."
+          : "VOICE DELIVERY (SARA Real Girl): Speak naturally like a real, expressive, grounded young woman — warm, quick-witted, relaxed, and authentic.";
       const finalInstructions = [
         formatSystemInstructionsWithMemories(
           `${capabilityInstructions}\n\n${LIVE_AGENT_INSTRUCTIONS}\n\n${truthFirstInstructions()}\n\n${presenceInstructions}${recentConversationContext}`,
           memories,
         ),
+        personaModeDirective,
         ...(voiceStyle ? [voiceStyle] : []),
         "FINAL TURN DISCIPLINE: Contribute before you inquire. When the user makes an observation or expresses a feeling, answer with a concrete statement and normally zero questions. Never propose learning their routine, preferences, memories, or personal details as the solution to sounding human. Do not claim emotional connection. Let a complete statement end naturally. Never append a reflexive feedback check such as 'Kya bolte ho?', 'right?', 'hai na?', 'what do you think?', or 'kaisa laga?' to an already complete observation.",
       ].join("\n\n");
@@ -4586,6 +5711,15 @@ async function startServer() {
             return;
           }
 
+          // Deterministic instant voice/text mode & UI switcher (SARA <-> J.A.R.V.I.S. <-> ULTRON)
+          if (/\b(?:activate|start|switch to|turn on|open)\s+jarvis\b/i.test(settledText)) {
+            void runtime.switchPersonaMode("jarvis");
+          } else if (/\b(?:activate|start|switch to|turn on|open)\s+ultron\b/i.test(settledText)) {
+            void runtime.switchPersonaMode("ultron");
+          } else if (/\b(?:switch (?:back )?to sara|activate sara|deactivate (?:jarvis|ultron)|turn off (?:jarvis|ultron)|stand down ultron)\b/i.test(settledText)) {
+            void runtime.switchPersonaMode("sara");
+          }
+
           void processCognitiveEvent({
             type: classifyUserEventType(settledText),
             source: "conversation",
@@ -4597,10 +5731,16 @@ async function startServer() {
         userCognitionTimer.unref?.();
       };
       
-      // Live voice model comes from the model registry (Settings → AI / Models).
+      // Live voice model & per-persona Gemini voice (SARA = girl, J.A.R.V.I.S. = boy, ULTRON = cybernetic male).
       const liveSelection = runtime.registry.getModel(runtime.registry.getSelection().live);
       const liveModelName = liveSelection?.capabilities.liveAudio ? liveSelection.modelName : "gemini-3.1-flash-live-preview";
-      const liveVoiceName = runtime.settings.get().voice.voiceName || String(liveSelection?.options?.voiceName || "Aoede");
+      const personaSnap = runtime.settings.get().personas;
+      const liveVoiceName =
+        personaSnap.activeMode === "ultron"
+          ? personaSnap.ultronVoiceName || "Fenrir"
+          : personaSnap.activeMode === "jarvis"
+          ? personaSnap.jarvisVoiceName || "Charon"
+          : personaSnap.saraVoiceName || "Aoede";
       // Session resumption: Gemini Live sends GoAway before ending a session;
       // we reconnect with the latest resumption handle so long conversations
       // continue instead of dying.

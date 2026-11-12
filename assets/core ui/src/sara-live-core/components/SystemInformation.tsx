@@ -76,7 +76,7 @@ export const SystemInformation: React.FC<SystemInformationProps> = ({
       {/* TOP PERIMETER BAR */}
       <div className="flex flex-wrap items-start justify-between gap-4">
         {/* Top-Left: SARA Operational Status & Bridge State */}
-        <div className="flex flex-col gap-2">
+        <div className={`${deckExpanded ? 'hidden lg:flex' : 'flex'} flex-col gap-2`}>
           {indicators.saraStatus && (
             <div
               className={`sara-glass-panel ${pointerClass} flex items-center gap-3 rounded-xl px-3.5 py-2`}
@@ -163,7 +163,7 @@ export const SystemInformation: React.FC<SystemInformationProps> = ({
         {/* Top-Right: Chronometer (Time & Date) */}
         {indicators.dateTime && (
           <div
-            className={`sara-glass-panel ${pointerClass} rounded-xl px-4 py-2 text-right`}
+            className={`sara-glass-panel ${pointerClass} ml-auto rounded-xl px-4 py-2 text-right`}
           >
             <div
               className="font-mono text-lg font-semibold tracking-wider tabular-nums"
@@ -181,7 +181,7 @@ export const SystemInformation: React.FC<SystemInformationProps> = ({
       {/* BOTTOM PERIMETER TELEMETRY STRIP */}
       <div className="flex flex-wrap items-end justify-between gap-3">
         {/* Bottom-Left: Hardware, Memory, Network, Active App */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className={`${deckExpanded ? 'hidden lg:flex' : 'flex'} flex-wrap items-center gap-2`}>
           {indicators.cpuUsage && (
             <div
               className={`sara-glass-panel ${pointerClass} flex items-center gap-2 rounded-lg px-3 py-1.5 text-[10px]`}
@@ -212,7 +212,9 @@ export const SystemInformation: React.FC<SystemInformationProps> = ({
               <span className="text-slate-400 uppercase">MEM:</span>
               <span className="font-mono text-slate-200">
                 {telemetry.ramUsagePercent !== null
-                  ? `${telemetry.ramUsagePercent}% • ${telemetry.ramDetail}`
+                  ? telemetry.ramDetail
+                    ? `${telemetry.ramUsagePercent}% • ${telemetry.ramDetail}`
+                    : `${telemetry.ramUsagePercent}%`
                   : telemetry.ramDetail ?? 'Unavailable'}
               </span>
             </div>

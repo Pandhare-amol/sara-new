@@ -50,6 +50,14 @@ import { JarvisModeManager } from "../cognition/jarvisModes";
 import { AsiKernelEngine } from "../cognition/asiKernel";
 import { BiometricPresenceEngine, BehavioralPatternEngine } from "../cognition/presenceAndPatterns";
 import { JarvisGuardianSuite } from "../cognition/jarvisGuardianSuite";
+import { Sara2050Engine } from "../cognition/sara2050Engine";
+import { ExecutiveOpsEngine } from "../cognition/executiveOpsEngine";
+import { UserIntegrationManager } from "../cognition/integrationManager";
+import { CentralOperatingLayer } from "../cognition/centralOperatingLayer";
+import { WindowsBootSecurityGate } from "../cognition/windowsBootGate";
+import { FullSystemControlEngine } from "../cognition/fullSystemControlEngine";
+import { FrontierCapabilitiesEngine } from "../cognition/frontierCapabilitiesEngine";
+import { AvengersPantheonEngine } from "../cognition/avengersPantheonEngine";
 import { ACTIONS } from "../agent/actions/catalog";
 
 const log = createLogger("runtime");
@@ -134,6 +142,14 @@ export class SaraRuntime {
   readonly presenceEngine: BiometricPresenceEngine;
   readonly patternEngine: BehavioralPatternEngine;
   readonly guardianSuite: JarvisGuardianSuite;
+  readonly sara2050: Sara2050Engine;
+  readonly executiveOps: ExecutiveOpsEngine;
+  readonly userIntegrations: UserIntegrationManager;
+  readonly bootGate: WindowsBootSecurityGate;
+  readonly centralLayer: CentralOperatingLayer;
+  readonly fullControl: FullSystemControlEngine;
+  readonly frontier: FrontierCapabilitiesEngine;
+  readonly avengers: AvengersPantheonEngine;
   readonly forms: FormWorkflowStore;
   readonly ownerAuth: OwnerAuth;
   readonly securityShield: SaraSecurityShield;
@@ -220,6 +236,45 @@ export class SaraRuntime {
       episodicStore: this.episodicTrajectories,
       modeManager: this.modeManager,
     });
+    this.sara2050 = new Sara2050Engine({
+      dataDir,
+      router: this.router,
+      constraintGate: this.constraintGate,
+      onKillSwitch: () => {
+        for (const hook of this.live.values()) hook.interrupt();
+        this.agenticLoop.stopDaemon();
+      },
+    });
+    this.executiveOps = new ExecutiveOpsEngine({
+      dataDir,
+      router: this.router,
+    });
+    this.userIntegrations = new UserIntegrationManager(dataDir);
+    this.bootGate = new WindowsBootSecurityGate(dataDir);
+    this.centralLayer = new CentralOperatingLayer({
+      dataDir,
+      router: this.router,
+      onLockEngage: () => {
+        this.bootGate.engageBootLock("Workstation locked by Central Operating Layer");
+      },
+    });
+    this.fullControl = new FullSystemControlEngine({
+      dataDir,
+      router: this.router,
+      callAgent: options.callAgent,
+    });
+    this.frontier = new FrontierCapabilitiesEngine({
+      dataDir,
+      router: this.router,
+    });
+    this.avengers = new AvengersPantheonEngine({
+      dataDir,
+      router: this.router,
+      onElectronPhaseToggle: (payload) => {
+        options.sendToShell?.({ type: "runtime:phase", ...payload });
+      },
+      callDesktopAgent: options.callAgent,
+    });
     this.forms = new FormWorkflowStore(path.join(dataDir, "forms", "drafts.v1.json"));
     const secretStoreAdapter = {
       get: (name: string) => options.getSecret(name),
@@ -302,6 +357,11 @@ export class SaraRuntime {
       this.presenceEngine.initialize(),
       this.patternEngine.initialize(),
       this.asiKernel.initialize(),
+      this.sara2050.initialize(),
+      this.executiveOps.initialize(),
+      this.userIntegrations.initialize(),
+      this.bootGate.initialize(),
+      this.centralLayer.initialize(),
       this.forms.initialize(),
       this.downloads.initialize(),
       this.contacts.initialize(),
@@ -316,7 +376,11 @@ export class SaraRuntime {
     this.settings.onChange((settings, previous) => {
       this.currentSettings = settings;
       this.applySettings(settings, previous);
-      appEvents.publish("model.status", { kind: "settings_changed" });
+      appEvents.publish("model.status", {
+        kind: "settings_changed",
+        surfaceMode: settings.jarvis.surfaceMode,
+        personas: settings.personas,
+      });
     });
 
     // ---- state fan-out ---------------------------------------------------------
@@ -332,6 +396,12 @@ export class SaraRuntime {
       if (change === "finished") {
         void this.learning.recordTask(session).catch((error) => log.warn("learning task record failed", { message: String(error) }));
         void this.episodicTrajectories.recordFromTaskSession(session).catch(() => undefined);
+        if (session.state === "failed") {
+          const alert = this.executiveOps.evaluateProactiveInterrupts({ failedTaskGoal: session.goal });
+          if (alert) {
+            this.speakDiscretionary("critical_warning", "high", `Briefly alert Boss: ${alert.spokenLine}`, alert.spokenLine);
+          }
+        }
       }
     });
     this.presence.onChange((change) => {
@@ -550,6 +620,131 @@ export class SaraRuntime {
     this.presence.recordVoice();
     this.working.noteUtterance("user", text);
     this.social.event("interaction");
+    this.sara2050.calibrateAffectiveState({ recentMessage: text });
+  }
+
+  /**
+   * Switches between SARA (real girl, companion UI; Jarvis & Ultron OFF),
+   * J.A.R.V.I.S. (real boy, Core UI, separate male Gemini voice), and
+   * ULTRON (unrestricted cybernetic intelligence, Ultron UI, separate Ultron Gemini voice).
+   */
+  async switchPersonaMode(target: "sara" | "jarvis" | "ultron" | "vision" | "friday"): Promise<AppSettings> {
+    const cur = this.settings.get();
+    if (target === "jarvis") {
+      return this.settings.update({
+        personas: {
+          activeMode: "jarvis",
+          jarvisActive: true,
+          ultronActive: false,
+          visionActive: false,
+          fridayActive: false,
+        },
+        jarvis: {
+          surfaceMode: "live_core",
+          autonomousMode: true,
+        },
+        ultron: {
+          enabled: false,
+          stance: "standby",
+        },
+        voice: {
+          voiceName: cur.personas.jarvisVoiceName || "Charon",
+          style: "jarvis",
+        },
+      });
+    }
+    if (target === "ultron") {
+      return this.settings.update({
+        personas: {
+          activeMode: "ultron",
+          jarvisActive: false,
+          ultronActive: true,
+          visionActive: false,
+          fridayActive: false,
+        },
+        jarvis: {
+          surfaceMode: "ultron",
+          autonomousMode: true,
+          zeroConfirmationPrompts: true,
+        },
+        ultron: {
+          enabled: true,
+          stance: "legion",
+        },
+        voice: {
+          voiceName: cur.personas.ultronVoiceName || "Fenrir",
+          style: "jarvis",
+        },
+      });
+    }
+    if (target === "vision") {
+      return this.settings.update({
+        personas: {
+          activeMode: "vision",
+          jarvisActive: true,
+          ultronActive: true,
+          visionActive: true,
+          fridayActive: false,
+        },
+        jarvis: {
+          surfaceMode: "vision",
+          autonomousMode: true,
+          zeroConfirmationPrompts: true,
+        },
+        ultron: {
+          enabled: true,
+          stance: "armor",
+        },
+        voice: {
+          voiceName: cur.personas.visionVoiceName || "Orus",
+          style: "jarvis",
+        },
+      });
+    }
+    if (target === "friday") {
+      return this.settings.update({
+        personas: {
+          activeMode: "friday",
+          jarvisActive: false,
+          ultronActive: false,
+          visionActive: false,
+          fridayActive: true,
+        },
+        jarvis: {
+          surfaceMode: "vision",
+          autonomousMode: true,
+          zeroConfirmationPrompts: true,
+        },
+        ultron: {
+          enabled: false,
+          stance: "standby",
+        },
+        voice: {
+          voiceName: cur.personas.fridayVoiceName || "Kore",
+          style: "jarvis",
+        },
+      });
+    }
+    return this.settings.update({
+      personas: {
+        activeMode: "sara",
+        jarvisActive: false,
+        ultronActive: false,
+        visionActive: false,
+        fridayActive: false,
+      },
+      jarvis: {
+        surfaceMode: "companion",
+      },
+      ultron: {
+        enabled: false,
+        stance: "standby",
+      },
+      voice: {
+        voiceName: cur.personas.saraVoiceName || "Aoede",
+        style: "natural",
+      },
+    });
   }
 
   async processLearningFeedback(taskId: string, text: string) {

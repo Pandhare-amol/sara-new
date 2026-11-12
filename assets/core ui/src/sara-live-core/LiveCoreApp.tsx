@@ -30,6 +30,10 @@ import { SystemInformation } from './components/SystemInformation';
 import { FloatingIndicators } from './components/FloatingIndicators';
 import { SettingsPanel } from './components/SettingsPanel';
 import { DeckTabId, JarvisCommandDeck } from './components/JarvisCommandDeck';
+import { TransparentJarvisChat } from './components/TransparentJarvisChat';
+import { SettingsPanel as SaraGlobalSettingsPanel } from '../../../../src/components/SettingsPanel';
+import { api, type AppSettings, type AppSettingsPatch } from '../../../../src/lib/appApi';
+import { loadSettings, saveSettings, type SaraSettings } from '../../../../src/lib/saraSettingsStore';
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -95,22 +99,67 @@ class LiveCoreErrorBoundary extends ErrorBoundaryBase {
 
 export interface LiveCoreAppProps {
   onSwitchToExistingShell?: () => void;
+  onSwitchSurface?: (mode: 'companion' | 'live_core' | 'ultron' | 'sara_os' | 'central_os') => void;
 }
 
 const LiveCoreWorkspace: React.FC<LiveCoreAppProps> = ({
   onSwitchToExistingShell,
+  onSwitchSurface,
 }) => {
   const settingsStore = useMemo(() => new LiveCoreSettingsStore(), []);
   const [settings, setSettings] = useState<LiveCoreSettings>(() =>
     settingsStore.getSettings()
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [saraSettingsOpen, setSaraSettingsOpen] = useState(false);
+  const [chatPanelOpen, setChatPanelOpen] = useState(true);
+  const [saraLocalSettings, setSaraLocalSettings] = useState<SaraSettings>(() =>
+    loadSettings()
+  );
+  const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
   const [activeDeckTab, setActiveDeckTab] = useState<DeckTabId>('command');
   const [deckExpanded, setDeckExpanded] = useState<boolean>(true);
   const [externalActionNonce, setExternalActionNonce] = useState<{
     action: string;
     nonce: number;
   } | null>(null);
+
+  useEffect(() => {
+    void api
+      .appSettings()
+      .then((s) => setAppSettings(s))
+      .catch(() => undefined);
+  }, []);
+
+  const handleSaraLocalSettingsChange = useCallback(
+    (patch: Partial<SaraSettings>) => {
+      setSaraLocalSettings((prev) => {
+        const next = { ...prev, ...patch };
+        saveSettings(next);
+        return next;
+      });
+    },
+    []
+  );
+
+  const handleAppSettingsChange = useCallback((patch: AppSettingsPatch) => {
+    setAppSettings((current) => {
+      if (!current) return current;
+      const next = { ...current } as Record<string, unknown>;
+      for (const [key, value] of Object.entries(patch)) {
+        const base = (current as unknown as Record<string, unknown>)[key];
+        next[key] =
+          value && typeof value === 'object' && base && typeof base === 'object'
+            ? { ...(base as object), ...(value as object) }
+            : value;
+      }
+      return next as unknown as AppSettings;
+    });
+    void api
+      .updateAppSettings(patch)
+      .then((updated) => setAppSettings(updated))
+      .catch(() => undefined);
+  }, []);
 
   const stateManager = useMemo(() => new CoreStateManager(), []);
   const colorEngine = useMemo(
@@ -256,7 +305,7 @@ const LiveCoreWorkspace: React.FC<LiveCoreAppProps> = ({
 
   return (
     <div ref={rootRef} className="sara-live-core-root select-none">
-      {/* Native Windows 10/11 Application Titlebar & J.A.R.V.I.S. Command Deck */}
+      {/* Native Application Titlebar & SARA Command Deck */}
       <JarvisCommandDeck
         activeTab={activeDeckTab}
         deckExpanded={deckExpanded && settings.hudMode !== 'zen'}
@@ -268,7 +317,9 @@ const LiveCoreWorkspace: React.FC<LiveCoreAppProps> = ({
           settingsStore.updateSettings({ quality })
         }
         onOpenVisualSettings={() => setSettingsOpen(true)}
+        onOpenSaraSettings={() => setSaraSettingsOpen(true)}
         onSwitchToExistingShell={onSwitchToExistingShell}
+        onSwitchSurface={onSwitchSurface}
         externalActionNonce={externalActionNonce}
       />
 
@@ -320,6 +371,17 @@ const LiveCoreWorkspace: React.FC<LiveCoreAppProps> = ({
         deckExpanded={deckExpanded && settings.hudMode !== 'zen'}
       />
 
+      {/* Transparent Floating J.A.R.V.I.S. Chat & Command Panel */}
+      {settings.hudMode !== 'zen' && (
+        <TransparentJarvisChat
+          isOpen={chatPanelOpen}
+          onToggleOpen={() => setChatPanelOpen((v) => !v)}
+          onSetCoreState={triggerDiagnosticState}
+          onPulseWave={pulseWaveManually}
+          onSwitchSurface={onSwitchSurface}
+        />
+      )}
+
       {/* Compact Micro-Buttons Dock for SARA Operations & Core Controls */}
       <FloatingIndicators
         activeState={activeState}
@@ -355,6 +417,16 @@ const LiveCoreWorkspace: React.FC<LiveCoreAppProps> = ({
         onTriggerDiagnosticState={triggerDiagnosticState}
         onToggleMicReactivity={toggleMicrophoneReactivity}
         onSwitchToExistingShell={onSwitchToExistingShell}
+      />
+
+      {/* Full SARA Global Settings Modal (Models, Voice, Permissions, Character & UI Switcher) */}
+      <SaraGlobalSettingsPanel
+        isOpen={saraSettingsOpen}
+        onClose={() => setSaraSettingsOpen(false)}
+        settings={saraLocalSettings}
+        onChange={handleSaraLocalSettingsChange}
+        appSettings={appSettings}
+        onAppSettingsChange={handleAppSettingsChange}
       />
     </div>
   );

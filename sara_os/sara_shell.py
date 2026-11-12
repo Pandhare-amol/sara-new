@@ -14,7 +14,7 @@ import urllib.request
 
 UI_THEMES = {
     "NEURAL_HUD": {
-        "name": "01 // NEURAL HUD (JARVIS CORE)",
+        "name": "01 // AURORA SPATIAL (SARA CORE)",
         "bg": "#050A14",
         "panel": "#0B162C",
         "accent": "#00F0FF",
@@ -22,7 +22,7 @@ UI_THEMES = {
         "border": "1px solid #00F0FF",
     },
     "CYBER_ARCHITECT": {
-        "name": "02 // CYBER ARCHITECT (ASI R&D)",
+        "name": "02 // CYBER ARCHITECT (SARA R&D)",
         "bg": "#080510",
         "panel": "#140C28",
         "accent": "#B829EA",
@@ -30,7 +30,7 @@ UI_THEMES = {
         "border": "1px solid #B829EA",
     },
     "TACTICAL_CRIMSON": {
-        "name": "03 // TACTICAL DEFENSE (ULTRON)",
+        "name": "03 // SENTINEL PERIMETER (DEFENSE)",
         "bg": "#120404",
         "panel": "#260808",
         "accent": "#FF2A2A",
