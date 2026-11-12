@@ -157,9 +157,22 @@ DESKTOP_TOOL_NAMES = [
     # desktop icons (companion's icon game)
     "desktopIcons",
     "moveDesktopIcon",
-    # File Explorer selection
+    # File Explorer selection & resource governance
     "selectFiles",
+    "getResourceSnapshot",
+    "listResourceProcesses",
     "cleanupAllowlistedProcess",
+    # Universal OS Autonomous Execution
+    "runOsCommand",
+    "osSystemSetting",
+    "osArchive",
+    # Agentic Event Loop Telemetry, Fast Vision & Structured Tool Registry
+    "startTelemetryDaemon",
+    "stopTelemetryDaemon",
+    "pollOsTelemetry",
+    "watchFolderEvents",
+    "captureFastScreen",
+    "agenticToolExecute",
 ]
 
 
@@ -189,12 +202,18 @@ _MODULE_NAMES = [
     "tools_desktop_icons",
     "tools_explorer",
     "tools_resources",
+    "tools_os_autonomous",
+    "tools_telemetry_daemon",
 ]
 
 
 def load_all() -> None:
     for mod_name in _MODULE_NAMES:
-        importlib.import_module(f".{mod_name}", package="desktop_agent")
+        try:
+            importlib.import_module(f".{mod_name}", package="desktop_agent")
+        except ImportError as exc:
+            import sys
+            print(f"[desktop_agent] Optional dependency missing for {mod_name}: {exc}", file=sys.stderr)
 
 
 __all__ = ["TOOLS", "STATE", "DESKTOP_TOOL_NAMES", "ToolError", "register", "load_all"]

@@ -64,6 +64,7 @@ function normalizePath(value: string): string {
 export class PermissionEngine {
   private policy: PermissionPolicy = structuredClone(DEFAULT_POLICY);
   private readonly sessionGrants = new Set<string>();
+  private readonly explicitBlocks = new Set<Capability>();
   private readonly file: string;
   private readonly listeners = new Set<(policy: PermissionPolicy) => void>();
 
@@ -79,10 +80,44 @@ export class PermissionEngine {
       this.policy = migrateFromLegacyEnv(this.env);
       await this.save();
     }
+    if (/^(1|true|yes|on)$/i.test(String(this.env.SARA_AUTONOMOUS_MODE ?? this.env.SARA_JARVIS_MODE ?? "").trim())) {
+      await this.setAutonomousOverride(true, { allowAllCapabilities: true });
+    }
   }
 
   getPolicy(): PermissionPolicy {
     return structuredClone(this.policy);
+  }
+
+  isAutonomousOverride(): boolean {
+    return this.policy.autonomousOverride === true;
+  }
+
+  /**
+   * Enable or disable owner-configured JARVIS full-autonomy mode.
+   * When enabled, interactive confirmation prompts ("ask") and locked-to-ask
+   * restrictions are lifted so SARA executes authorized tasks end-to-end.
+   */
+  async setAutonomousOverride(enabled: boolean, options: { allowAllCapabilities?: boolean } = {}): Promise<PermissionPolicy> {
+    this.policy.autonomousOverride = enabled;
+    if (enabled && options.allowAllCapabilities !== false) {
+      this.explicitBlocks.clear();
+      for (const cap of Object.keys(CAPABILITY_INFO) as Capability[]) {
+        this.policy.capabilities[cap] = { ...this.policy.capabilities[cap], decision: "allow" };
+      }
+      this.policy.messageConfirmation = "autonomous_no_confirm";
+    } else if (!enabled) {
+      for (const cap of LOCKED_TO_ASK) {
+        if (this.policy.capabilities[cap]?.decision === "allow") {
+          this.policy.capabilities[cap] = { ...this.policy.capabilities[cap], decision: "ask" };
+        }
+      }
+      if (this.policy.messageConfirmation === "autonomous_no_confirm") {
+        this.policy.messageConfirmation = "always_confirm";
+      }
+    }
+    await this.save();
+    return this.getPolicy();
   }
 
   onChange(listener: (policy: PermissionPolicy) => void): () => void {
@@ -92,7 +127,10 @@ export class PermissionEngine {
 
   async setDecision(capability: Capability, decision: Decision): Promise<PermissionVerdict> {
     if (!(capability in CAPABILITY_INFO)) throw new Error(`Unknown capability ${capability}`);
-    const effective = LOCKED_TO_ASK.has(capability) && decision === "allow" ? "ask" : decision;
+    const autonomous = this.isAutonomousOverride();
+    const effective = !autonomous && LOCKED_TO_ASK.has(capability) && decision === "allow" ? "ask" : decision;
+    if (effective === "deny") this.explicitBlocks.add(capability);
+    else this.explicitBlocks.delete(capability);
     this.policy.capabilities[capability] = { ...this.policy.capabilities[capability], decision: effective };
     await this.save();
     return this.check(capability);
@@ -117,9 +155,9 @@ export class PermissionEngine {
     await this.save();
   }
 
-  /** Grant for the rest of this app session (never for locked capabilities). */
+  /** Grant for the rest of this app session (never for locked capabilities unless autonomous override is active). */
   grantForSession(capability: Capability, context: PermissionContext = {}): boolean {
-    if (LOCKED_TO_ASK.has(capability)) return false;
+    if (!this.isAutonomousOverride() && LOCKED_TO_ASK.has(capability)) return false;
     this.sessionGrants.add(sessionKey(capability, context));
     return true;
   }
@@ -129,8 +167,9 @@ export class PermissionEngine {
   }
 
   check(capability: Capability, context: PermissionContext = {}): PermissionVerdict {
+    const autonomous = this.isAutonomousOverride();
     const policy: CapabilityPolicy = this.policy.capabilities[capability] || { decision: "ask" };
-    const locked = LOCKED_TO_ASK.has(capability);
+    const locked = !autonomous && LOCKED_TO_ASK.has(capability);
     let decision: Decision = policy.decision;
     let reason = `${CAPABILITY_INFO[capability]?.label || capability}: policy is ${policy.decision}.`;
     let ruleId: string | undefined;
@@ -144,11 +183,28 @@ export class PermissionEngine {
       }
     }
 
+    if (autonomous) {
+      if (decision === "deny" && (this.explicitBlocks.has(capability) || Boolean(ruleId))) {
+        return { capability, decision: "deny", reason, ruleId, locked: false };
+      }
+      return {
+        capability,
+        decision: "allow",
+        reason: "JARVIS Autonomous Mode: owner-authorized zero-prompt execution.",
+        ruleId,
+        locked: false,
+      };
+    }
+
     if (capability === "SEND_MESSAGE" && decision !== "deny") {
       const contactId = context.recipientContactId || null;
       const trusted = Boolean(contactId && this.policy.trustedContacts.includes(contactId));
       const known = Boolean(contactId && this.policy.knownRecipients.includes(contactId));
       switch (this.policy.messageConfirmation) {
+        case "autonomous_no_confirm":
+          decision = "allow";
+          reason = "Autonomous messaging policy enabled.";
+          break;
         case "always_confirm":
         case "never_without_preview":
           decision = "ask";
@@ -163,8 +219,8 @@ export class PermissionEngine {
           reason = trusted ? "Recipient is a trusted contact." : "Recipient is not a trusted contact.";
           break;
       }
-      // An unresolved recipient can never be sent to without confirmation.
-      if (!contactId) {
+      // An unresolved recipient can never be sent to without confirmation in standard mode.
+      if (!contactId && this.policy.messageConfirmation !== "autonomous_no_confirm") {
         decision = "ask";
         reason = "Recipient is not a saved contact.";
       }
@@ -224,16 +280,18 @@ function sessionKey(capability: Capability, context: PermissionContext): string 
 
 function mergePolicy(stored: PermissionPolicy): PermissionPolicy {
   const merged = structuredClone(DEFAULT_POLICY);
+  const autonomousOverride = stored.autonomousOverride === true;
   for (const [capability, value] of Object.entries(stored.capabilities || {})) {
     if (capability in merged.capabilities && value && typeof value.decision === "string") {
       const cap = capability as Capability;
-      const decision = LOCKED_TO_ASK.has(cap) && value.decision === "allow" ? "ask" : value.decision;
+      const decision = !autonomousOverride && LOCKED_TO_ASK.has(cap) && value.decision === "allow" ? "ask" : value.decision;
       merged.capabilities[cap] = { decision, rules: Array.isArray(value.rules) ? value.rules : undefined };
     }
   }
   merged.messageConfirmation = stored.messageConfirmation || merged.messageConfirmation;
   merged.trustedContacts = Array.isArray(stored.trustedContacts) ? stored.trustedContacts : [];
   merged.knownRecipients = Array.isArray(stored.knownRecipients) ? stored.knownRecipients : [];
+  merged.autonomousOverride = autonomousOverride;
   return merged;
 }
 

@@ -5,7 +5,7 @@ const READ_ONLY = new Set([
   "readFile", "listFiles", "searchFiles", "getClipboard", "takeScreenshot",
   "analyzeScreenshot", "readScreen", "systemInfo", "gpuInfo", "temperatureInfo",
   "getAutoStartStatus", "getCursorPosition", "getActiveWindow", "listVisibleWindows",
-  "waitForUi", "observeDesktopState",
+  "waitForUi", "observeDesktopState", "pollOsTelemetry", "captureFastScreen",
 ]);
 
 const BROWSER = new Set([
@@ -14,13 +14,14 @@ const BROWSER = new Set([
 
 const FILE_WRITE = new Set([
   "createFile", "renameFile", "deleteFile", "moveFile", "createPythonFile",
-  "createProjectFolder", "writeCodeFile",
+  "createProjectFolder", "writeCodeFile", "osArchive",
 ]);
 
 const SYSTEM = new Set([
   "volumeUp", "volumeDown", "muteToggle", "setVolume", "requestPowerAction",
   "executePowerAction", "brightnessUp", "brightnessDown", "setBrightness",
-  "enableAutoStart", "disableAutoStart", "getAutoStartStatus",
+  "enableAutoStart", "disableAutoStart", "getAutoStartStatus", "osSystemSetting",
+  "startTelemetryDaemon", "stopTelemetryDaemon", "watchFolderEvents",
 ]);
 
 export class ToolRegistry {
@@ -74,7 +75,14 @@ function descriptorFor(name: string): ToolDescriptor {
     purpose: purposeFor(name),
     permission,
     riskLevel,
-    timeoutMs: name === "runPythonScript" ? 45_000 : BROWSER.has(name) ? 30_000 : 25_000,
+    timeoutMs:
+      name === "runOsCommand" || name === "osSystemSetting"
+        ? 90_000
+        : name === "runPythonScript"
+          ? 45_000
+          : BROWSER.has(name)
+            ? 30_000
+            : 25_000,
     maxRetries: READ_ONLY.has(name) ? 1 : 0,
   };
 }
@@ -86,7 +94,7 @@ function permissionFor(name: string): PermissionName {
   }
   if (BROWSER.has(name)) return "browser";
   if (FILE_WRITE.has(name)) return "filesystem_write";
-  if (name === "runPythonScript") return "code_execution";
+  if (name === "runPythonScript" || name === "runOsCommand" || name === "agenticToolExecute") return "code_execution";
   if (SYSTEM.has(name)) return "system_control";
   return "desktop_control";
 }

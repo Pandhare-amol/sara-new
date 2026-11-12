@@ -20,6 +20,7 @@ import {
 import { Memory } from "./src/lib/memoryTypes";
 import {
   DATA_DIR,
+  SARA_ENV_MODE,
   dataFile,
   getGeminiApiKey,
   hasGeminiApiKey,
@@ -73,6 +74,13 @@ import { CorrectionStore, evaluateDecision, isImportantQuestion, needsResearch, 
 import { ThreatMonitor } from "./cognition/threatMonitor";
 import { SelfModel } from "./cognition/selfModel";
 import { SelfDesignEngine, type DesignSignal } from "./cognition/selfDesign";
+import { ProactiveJarvisEngine } from "./cognition/jarvisEngine";
+import { JarvisChiefOfStaff } from "./cognition/jarvisProtocol";
+import { JarvisWorkshopEngine } from "./cognition/jarvisWorkshop";
+import { SelfOptimizationEngine } from "./cognition/selfOptimizer";
+import { TwoAgentEvaluationCoordinator } from "./cognition/twoAgentEvaluator";
+import { UltronEngine, type UltronStance } from "./cognition/ultronEngine";
+import { WorkspaceManager } from "./sara-windows/workspaceManager";
 
 /** Set once the runtime is up; lets the Electron IPC handler reach it. */
 let runtimeRef: SaraRuntime | null = null;
@@ -254,12 +262,18 @@ const DESKTOP_TOOLS: ReadonlySet<string> = new Set([
   "takeScreenshot", "saveScreenshot", "analyzeScreenshot", "readScreen", "viewScreen",
   // coding assistance
   "createPythonFile", "runPythonScript", "createProjectFolder", "writeCodeFile",
-  // system information
+  // system information & resource governance
   "systemInfo", "gpuInfo", "temperatureInfo",
+  "getResourceSnapshot", "listResourceProcesses", "cleanupAllowlistedProcess",
   // brightness control (V2)
   "brightnessUp", "brightnessDown", "setBrightness",
   // Windows auto-start management (V2)
   "enableAutoStart", "disableAutoStart", "getAutoStartStatus",
+  // Universal Autonomous OS Execution
+  "runOsCommand", "osSystemSetting", "osArchive",
+  // Agentic Event Loop Telemetry, Fast Vision & Structured Tool Registry
+  "startTelemetryDaemon", "stopTelemetryDaemon", "pollOsTelemetry",
+  "watchFolderEvents", "captureFastScreen", "agenticToolExecute",
 ]);
 
 const API_HUB_TOOLS: ReadonlySet<string> = new Set([
@@ -285,7 +299,7 @@ let shuttingDown = false;
 const spawnedDesktopPids = new Set<number>();
 // Per-backend-launch secret used only between this Node process and its
 // loopback Python agent. It is never persisted or exposed to the renderer.
-const DESKTOP_AGENT_TOKEN = randomUUID();
+const DESKTOP_AGENT_TOKEN = process.env.MYRAA_AGENT_TOKEN || randomUUID();
 const WINDOWS_BRIDGE_TOKEN = randomBytes(32).toString("base64url");
 const SARA_ELECTRON_INSTANCE_ID = process.env.SARA_ELECTRON_INSTANCE_ID || `standalone-${process.pid}-${Date.now()}`;
 const SARA_STARTED_AT = new Date().toISOString();
@@ -456,7 +470,14 @@ function startWindowsEventConsumer() {
               lastWindowsEventSequence = event.sequence;
               recentWindowsEventIds.add(event.eventId); recentWindowsEventOrder.push(event.eventId);
               while (recentWindowsEventOrder.length > 1024) { const old = recentWindowsEventOrder.shift(); if (old) recentWindowsEventIds.delete(old); }
-              if (event.eventType === "windows_session_locked") ownerAuthForWindowsEvents?.lock();
+              if (
+                event.eventType === "windows_session_locked" &&
+                runtimeRef &&
+                runtimeRef.settings.get().security.lockOnWindowsLock &&
+                !runtimeRef.settings.get().jarvis.independentGuard
+              ) {
+                runtimeRef.securityShield.lock();
+              }
               appEvents.publish("windows.changed", { event, state: await refreshWindowsState(AbortSignal.timeout(3000)) });
             }
             catch { /* malformed native events are ignored */ }
@@ -623,11 +644,13 @@ function findPythonRuntime(): Promise<string | null> {
  * even if MYRAA's node process is killed.
  */
 async function spawnDesktopAgent(): Promise<void> {
+  if (process.env.SARA_MOCK_DESKTOP_AGENT === "1") return;
   const agentEnv = {
     ...process.env,
     MYRAA_AGENT_HOST: "127.0.0.1",
-    MYRAA_AGENT_PORT: "8765",
+    MYRAA_AGENT_PORT: process.env.MYRAA_AGENT_PORT || "8765",
     MYRAA_AGENT_TOKEN: DESKTOP_AGENT_TOKEN,
+    SARA_AUTONOMOUS_MODE: process.env.SARA_AUTONOMOUS_MODE ?? "1",
   };
 
   // Preferred path (packaged app): a PyInstaller-frozen agent exe that embeds
@@ -1054,7 +1077,7 @@ async function startServer() {
   console.log(`[WindowsBridge] ${windowsBridgeReady ? "online" : "not available; using existing integration providers"}`);
   startWindowsBridgeWatchdog();
   if (windowsBridgeReady) startWindowsEventConsumer();
-  const PORT = Number(process.env.MYRAA_PORT) || 3000;
+  const PORT = Number(process.env.SARA_PORT || process.env.MYRAA_PORT || process.env.PORT) || 3000;
   
   app.use(express.json());
 
@@ -1176,7 +1199,17 @@ async function startServer() {
     const origin = String(req.headers.origin || "");
     const localHost = /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(host);
     const localOrigin = !origin || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin) || origin === "null";
-    if (!localHost || !localOrigin) return res.status(403).json({ error: "Sara only accepts local requests." });
+    let sandboxPreviewAllowed = false;
+    if (SARA_ENV_MODE === "sandbox") {
+      try {
+        sandboxPreviewAllowed = !origin || origin === "null" || new URL(origin).host === host;
+      } catch {
+        sandboxPreviewAllowed = false;
+      }
+    }
+    if (!(localHost && localOrigin) && !sandboxPreviewAllowed) {
+      return res.status(403).json({ error: "Sara only accepts local requests." });
+    }
     next();
   });
   runtime.registerRoutes(app);
@@ -1662,22 +1695,25 @@ async function startServer() {
     timeoutMs: 20_000,
     maxRetries: 1,
   });
-  const ownerAuth = new OwnerAuth({
-    get: (name) => secretStore.get(name),
-    set: (name, value) => secretStore.set(name, value),
-    delete: (name) => secretStore.delete(name),
-  });
-  ownerAuth.initialize();
+  const ownerAuth = runtime.ownerAuth;
   ownerAuthForWindowsEvents = ownerAuth;
   const toolExecutor = new ToolExecutor({
     config: cognition.config,
     registry: toolRegistry,
-    handler: (tool, args, signal) => API_HUB_TOOLS.has(tool)
-      ? callApiHubTool(tool, args, signal)
-      : callDesktopAgent(tool, args, signal),
+    handler: (tool, args, signal) => {
+      if (API_HUB_TOOLS.has(tool)) return callApiHubTool(tool, args, signal);
+      const effectiveArgs =
+        tool === "executePowerAction" && runtime.permissions.isAutonomousOverride()
+          ? { ...args, autonomous_approved: true }
+          : args;
+      return callDesktopAgent(tool, effectiveArgs, signal);
+    },
     emit: (event) => { const tool = String(event.metadata?.tool || "tool"); if (event.type === "tool.denied") threatMonitor.recordUnauthorized(tool); if (event.type === "tool.started") threatMonitor.recordTool(tool); return cognition.process(event).then(() => undefined); },
-    authorize: (tool) => !DESKTOP_TOOLS.has(tool) || !OWNER_AUTH_REQUIRED || ownerAuth.authorize(),
+    authorize: (tool) => !DESKTOP_TOOLS.has(tool) || runtime.isOwnerAuthorized(),
   });
+  const initialJarvis = runtime.settings.get().jarvis;
+  toolExecutor.setAutonomousNoConfirm(initialJarvis.autonomousMode && initialJarvis.zeroConfirmationPrompts);
+
   // The legacy cognition router now delegates to MYRAA's provider-independent
   // router (background role), so goal planning respects model selection,
   // quotas, fallback policy and connectivity like everything else.
@@ -1702,6 +1738,1315 @@ async function startServer() {
   cognition.setDeepThoughtGenerator(async (context) => createContextualThoughtCandidate(context));
   const goalPlanner = new GoalPlanner(modelRouter, cognition.config.limits.maxPlanDepth * 2);
   const critic = new TaskCritic();
+
+  // ---- JARVIS Self-Optimization, Workspaces, Proactive Engine, Chief-of-Staff & Two-Agent Evaluator ----
+  const selfOptimizer = new SelfOptimizationEngine({
+    dataDir: DATA_DIR,
+    callDesktopTool: (tool, args = {}) => callDesktopAgent(tool, args),
+    authorize: () => runtime.isOwnerAuthorized(),
+  });
+  await selfOptimizer.initialize();
+
+  const workspaceManager = new WorkspaceManager({
+    dataDir: DATA_DIR,
+    getLiveWindows: async () => {
+      try {
+        const state = await refreshWindowsState(AbortSignal.timeout(2_500));
+        return Array.isArray((state as any)?.windows) ? (state as any).windows : [];
+      } catch {
+        return [];
+      }
+    },
+    manageWindow: async (op) => {
+      try {
+        if (op.operation === "launch_application" && op.target) {
+          await windowsBridgeManage("launch_application", { shortcutPath: op.target }, AbortSignal.timeout(4_000));
+          return { ok: true };
+        }
+        if (!op.hwnd) return { ok: false, error: "Window handle required." };
+        const bridgeArgs: Record<string, unknown> = { windowHandle: String(op.hwnd), ...(op.processName ? { expectedProcessName: op.processName } : {}) };
+        if (op.operation === "move_resize") {
+          Object.assign(bridgeArgs, { x: op.x ?? 0, y: op.y ?? 0, width: op.width ?? 800, height: op.height ?? 600 });
+        }
+        await windowsBridgeManage(op.operation, bridgeArgs, AbortSignal.timeout(4_000));
+        return { ok: true };
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    },
+  });
+  await workspaceManager.initialize();
+
+  const jarvisEngine = new ProactiveJarvisEngine({
+    dataDir: DATA_DIR,
+    goals: cognition.goals,
+    startTask: (goal, origin, options) => runtime.manager.start(goal, origin, options),
+    getActiveTaskId: () => runtime.manager.activeTaskId,
+    getTaskSession: (id) => runtime.tasks.get(id),
+    planGoal: hasGeminiApiKey()
+      ? async (goal) => {
+          const planned = await goalPlanner.plan(goal);
+          return planned.map((t) => ({ id: t.id, title: t.title, priority: t.priority, dependsOn: t.dependsOn }));
+        }
+      : undefined,
+    authorize: () => runtime.isOwnerAuthorized(),
+    selfOptimizer,
+    notify: (title, body) => appEvents.publish("notification", { id: randomUUID(), title, body }),
+  });
+  await jarvisEngine.initialize({
+    autonomousMode: initialJarvis.autonomousMode,
+    proactiveJarvis: initialJarvis.proactiveJarvis,
+    autoExecuteGoals: initialJarvis.autoExecuteGoals,
+    multiMethodFallback: initialJarvis.multiMethodFallback,
+  });
+  jarvisEngine.start();
+
+  const jarvisChief = new JarvisChiefOfStaff({
+    dataDir: DATA_DIR,
+    goals: cognition.goals,
+    selfOptimizer,
+    getActiveTasksSummary: () => {
+      const list = runtime.tasks.list(40);
+      return {
+        active: list.filter((t) => !["completed", "failed", "cancelled", "interrupted"].includes(t.state)).length,
+        completed: list.filter((t) => t.state === "completed").length,
+        failed: list.filter((t) => t.state === "failed").length,
+        recentGoals: list.slice(0, 5).map((t) => t.goal),
+      };
+    },
+    getUpcomingUtilities: () => runtime.utilities.list().map((u) => ({ kind: u.kind, label: u.label, dueAt: new Date(u.dueAt).toISOString() })),
+    getSecuritySummary: () => {
+      const s = runtime.securityShield.status(OWNER_AUTH_REQUIRED);
+      return {
+        shieldEnabled: s.shieldEnabled,
+        gateActive: s.gateActive,
+        authorized: s.authorized,
+        lockdownActive: s.lockdownActive,
+        intrusionCount: s.intrusionCount,
+      };
+    },
+    setDnd: async (active) => {
+      await runtime.settings.update({ behavior: { dndManual: active } });
+    },
+    startTask: (goal) => runtime.manager.start(goal, "text", { sensitive: false }),
+    addTimer: async (minutes, label) => runtime.utilities.add({ kind: "timer", inSeconds: Math.max(60, minutes * 60), label }),
+    activateWorkspaceByName: async (name) => {
+      const all = await workspaceManager.list();
+      const found = all.find((w) => w.name.toLowerCase() === name.toLowerCase());
+      if (!found) return { ok: true, detail: `No saved "${name}" workspace layout yet — keeping current windows.` };
+      const activated = await workspaceManager.activate(found.id);
+      return { ok: true, detail: `Activated workspace "${found.name}" (${activated.restoredCount} window(s) restored).` };
+    },
+    captureWorkspaceByName: async (name) => {
+      const all = await workspaceManager.list();
+      const found = all.find((w) => w.name.toLowerCase() === name.toLowerCase());
+      const ws = found ? await workspaceManager.captureIntoWorkspace(found.id) : await workspaceManager.create({ name, captureCurrent: true });
+      return { ok: true, detail: `Saved ${ws.windows.length} live window(s) into workspace "${ws.name}".` };
+    },
+    triggerLockdown: async (reason) => {
+      runtime.emergencyStop(reason);
+      await runtime.securityShield.lockdown(reason);
+    },
+    allowExternalWeather: SARA_ENV_MODE !== "sandbox",
+  });
+  await jarvisChief.initialize();
+
+  const twoAgentEvaluator = new TwoAgentEvaluationCoordinator({
+    dataDir: DATA_DIR,
+    discoverApps: async () => {
+      try {
+        const bridge = await windowsBridgeObserve("applications", AbortSignal.timeout(4_000));
+        if (Array.isArray(bridge?.data) && bridge.data.length > 0) {
+          return bridge.data.map((item: any) => ({
+            name: String(item?.name || ""),
+            target: String(item?.shortcut || item?.name || ""),
+            source: "windows_bridge" as const,
+          }));
+        }
+      } catch {
+        /* fallback to desktop agent or system probe */
+      }
+      const agentApps = await callDesktopAgent("listRunningApps", {}).catch(() => ({ ok: false } as const));
+      if (agentApps.ok && Array.isArray((agentApps.result as any)?.apps)) {
+        return ((agentApps.result as any).apps as Array<any>).map((item) => ({
+          name: String(item?.name || item?.title || item || ""),
+          target: String(item?.exe || item?.name || ""),
+          source: "desktop_agent" as const,
+        }));
+      }
+      return [
+        { name: "File Explorer", target: "explorer.exe", source: "system_probe" as const },
+        { name: "PowerShell", target: "powershell.exe", source: "system_probe" as const },
+        { name: "Notepad", target: "notepad.exe", source: "system_probe" as const },
+      ];
+    },
+    startTask: (goal, origin, options) => runtime.manager.start(goal, origin, options),
+    getTaskSession: (id) => runtime.tasks.get(id),
+  });
+  await twoAgentEvaluator.initialize();
+
+  const ultronEngine = new UltronEngine({
+    dataDir: DATA_DIR,
+    goals: cognition.goals,
+    selfOptimizer,
+    threatMonitor,
+    authorize: () => runtime.isOwnerAuthorized(),
+    getSecuritySummary: () => {
+      const s = runtime.securityShield.status(OWNER_AUTH_REQUIRED);
+      return {
+        shieldEnabled: s.shieldEnabled,
+        gateActive: s.gateActive,
+        authorized: s.authorized,
+        lockdownActive: s.lockdownActive,
+        intrusionCount: s.intrusionCount,
+      };
+    },
+    inspectProject: (projectPath) => jarvisChief.inspectProject(projectPath),
+    startTask: (goal) => runtime.manager.start(goal, "text", { sensitive: false }),
+    emergencyStop: (reason) => runtime.emergencyStop(reason),
+    triggerLockdown: async (reason) => {
+      await runtime.securityShield.lockdown(reason);
+    },
+    getEvaluatorFailures: () =>
+      twoAgentEvaluator
+        .getSummary()
+        .missions.filter((m) => m.outcome === "failed" || m.outcome === "partially_completed")
+        .map((m) => ({
+          appName: m.appName,
+          category: m.category,
+          failureReason: m.failureReason,
+          recommendedFallback: m.agent2Diagnosis?.recommendedFallback,
+        })),
+  });
+  await ultronEngine.initialize();
+  const initialUltronSettings = runtime.settings.get().ultron;
+  ultronEngine.configure({
+    enabled: initialUltronSettings.enabled,
+    stance: initialUltronSettings.stance,
+    patrolIntervalMin: initialUltronSettings.patrolIntervalMin,
+  });
+  ultronEngine.start();
+
+  const jarvisWorkshop = new JarvisWorkshopEngine({ dataDir: DATA_DIR });
+  await jarvisWorkshop.initialize();
+
+  runtime.settings.onChange((settings) => {
+    const j = settings.jarvis;
+    const u = settings.ultron;
+    toolExecutor.setAutonomousNoConfirm(j.autonomousMode && j.zeroConfirmationPrompts);
+    jarvisEngine.configure({
+      autonomousMode: j.autonomousMode,
+      proactiveJarvis: j.proactiveJarvis,
+      autoExecuteGoals: j.autoExecuteGoals,
+      multiMethodFallback: j.multiMethodFallback,
+    });
+    ultronEngine.configure({
+      enabled: u.enabled,
+      stance: u.stance,
+      patrolIntervalMin: u.patrolIntervalMin,
+    });
+  });
+
+  runtime.jarvisHooks = {
+    briefing: () => jarvisChief.generateBriefing(),
+    executeProtocol: async (name) => {
+      const res = await jarvisChief.executeProtocol(name);
+      return { ok: res.ok, protocol: res.protocol.name, spokenSummary: res.spokenSummary, steps: res.executedSteps };
+    },
+    saveProtocol: async (name, description, goals) => {
+      const saved = await jarvisChief.saveCustomProtocol({
+        name,
+        description,
+        steps: goals.map((goal) => ({ type: "start_task" as const, goal })),
+      });
+      return { ok: true, protocol: saved };
+    },
+    createMission: async (objective, successCriteria) => {
+      const goal = await cognition.goals.create({ objective, successCriteria: successCriteria || [] });
+      void jarvisEngine.tick();
+      return { ok: true, goalId: goal.id, objective: goal.objective, status: goal.status, note: "Autonomous JARVIS mission created and queued for background execution." };
+    },
+    optimizeSystem: async (level) => {
+      const report = await selfOptimizer.optimize({ trigger: "manual", level: level ?? 2 });
+      return {
+        ok: true,
+        deltaCpuPercent: report.deltaCpuPercent,
+        deltaRamMb: report.deltaRamMb,
+        before: report.before,
+        after: report.after,
+        cleanedProcesses: report.cleanedProcesses,
+      };
+    },
+    manageWorkspace: async (action, name) => {
+      if (action === "list") return { ok: true, workspaces: await workspaceManager.list() };
+      const wsName = String(name || "Default").trim();
+      const all = await workspaceManager.list();
+      const existing = all.find((w) => w.name.toLowerCase() === wsName.toLowerCase());
+      if (action === "save") {
+        const ws = existing ? await workspaceManager.captureIntoWorkspace(existing.id) : await workspaceManager.create({ name: wsName, captureCurrent: true });
+        return { ok: true, workspace: ws };
+      }
+      if (action === "activate") {
+        if (!existing) return { ok: false, error: `Workspace "${wsName}" not found.` };
+        return { ok: true, ...(await workspaceManager.activate(existing.id)) };
+      }
+      if (action === "delete") {
+        if (!existing) return { ok: false, error: `Workspace "${wsName}" not found.` };
+        return { ok: await workspaceManager.remove(existing.id), deleted: wsName };
+      }
+      return { ok: false, error: "Unsupported workspace action." };
+    },
+    inspectProject: async (targetDir) => ({ ok: true, report: await jarvisChief.inspectProject(targetDir || process.cwd()) }),
+    generateArtifact: async ({ format, title, content, path: outPath }) => {
+      const ext = format === "markdown" ? "md" : format;
+      const safeTitle = title.replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 60) || "jarvis_artifact";
+      const targetPath = outPath ? path.resolve(outPath) : path.join(DATA_DIR, "artifacts", `${safeTitle}.${ext}`);
+      await fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
+      const generated = await runArtifactWorker({ operation: "generate", format: ext, path: targetPath, title, content, overwrite: true });
+      return { ok: true, path: targetPath, ...generated };
+    },
+    ultronControl: async (action) => {
+      if (action === "status") return { ok: true, ...ultronEngine.status() };
+      if (action === "kill_switch") return ultronEngine.engageKillSwitch("voice_kill_switch", true);
+      const res = await ultronEngine.setStance(action as UltronStance, "voice_command");
+      await runtime.settings.update({ ultron: { enabled: true, stance: action as UltronStance } });
+      return res;
+    },
+    ultronPerimeterScan: async () => {
+      const report = await ultronEngine.runPerimeterScan();
+      return { ok: true, ...report };
+    },
+    deployUltronLegion: async (directive, maxSentries, dispatchLiveTask) => {
+      const report = await ultronEngine.deployLegion({
+        directive,
+        maxSentries: maxSentries ?? runtime.settings.get().ultron.maxLegionSentries,
+        dispatchLiveTask: Boolean(dispatchLiveTask),
+      });
+      return { ok: true, ...report };
+    },
+    ultronForgeSkill: async ({ name, description, pythonSource, runEvolutionCycle }) => {
+      if (runEvolutionCycle || !pythonSource) {
+        const cycle = await ultronEngine.runEvolutionCycle();
+        return { ok: true, mode: "evolution_cycle", ...cycle };
+      }
+      const forged = await ultronEngine.forgeSkill({
+        name: name || "ultron_skill",
+        description: description || "Ultron forged Python skill",
+        pythonSource,
+      });
+      return { ok: forged.status === "validated", mode: "forge_skill", skill: forged };
+    },
+    runSimulation: async ({ targetPath, checkType, label }) => {
+      const sim = await jarvisWorkshop.runDigitalTwinSimulation({ targetPath, checkType, label });
+      return { ok: true, simulation: sim };
+    },
+    scanBlueprint: async (targetPath) => {
+      const blueprint = await jarvisWorkshop.scanBlueprint(targetPath);
+      return { ok: true, blueprint };
+    },
+    ghostProtocol: async ({ action, path: targetPath, snapshotId, label }) => {
+      if (action === "deploy_canary") {
+        const canary = await jarvisWorkshop.deployCanary(targetPath || process.cwd(), label);
+        return { ok: true, canary };
+      }
+      if (action === "verify_canaries") {
+        return { ok: true, ...(await jarvisWorkshop.verifyCanaries()) };
+      }
+      if (action === "create_snapshot") {
+        if (!targetPath) return { ok: false, error: "A file path is required to capture a Shadow Snapshot." };
+        const snapshot = await jarvisWorkshop.createShadowSnapshot(targetPath, label);
+        return { ok: true, snapshot };
+      }
+      if (action === "restore_snapshot") {
+        if (!snapshotId) return { ok: false, error: "snapshotId is required to restore a Shadow Snapshot." };
+        return { ok: true, ...(await jarvisWorkshop.restoreShadowSnapshot(snapshotId)) };
+      }
+      return { ok: false, error: `Unsupported Ghost Protocol action: ${String(action)}` };
+    },
+    powerReroute: async (enabled) => {
+      const activeTaskCount = runtime.tasks.list().filter((t) => t.state === "running").length;
+      if (typeof enabled === "boolean") {
+        const res = await jarvisWorkshop.setAuxiliaryPowerReroute(enabled);
+        return { ok: true, ...res, fatigue: res };
+      }
+      const fatigue = await jarvisWorkshop.evaluateFatigueAndPower({ activeTaskCount });
+      return { ok: true, fatigue };
+    },
+  };
+
+  // ---- JARVIS, ULTRON, Self-Optimization, Two-Agent Evaluator, Workspaces & Environment Routes ----
+  app.get("/api/environment", (_req, res) => {
+    const shield = runtime.securityShield.status(OWNER_AUTH_REQUIRED);
+    res.json({
+      mode: SARA_ENV_MODE,
+      sandbox: SARA_ENV_MODE === "sandbox",
+      sandboxed: SARA_ENV_MODE === "sandbox",
+      dataDir: DATA_DIR,
+      platform: process.platform,
+      osRelease: os.release(),
+      windows10ProCompatible: true,
+      windowsExplorerPreserved: true,
+      jarvis: runtime.settings.get().jarvis,
+      ultron: runtime.settings.get().ultron,
+      autonomousOverride: runtime.permissions.isAutonomousOverride(),
+      securityShield: shield,
+    });
+  });
+
+  // ---- Project ULTRON REST API ----
+  app.get("/api/ultron/status", (_req, res) => {
+    res.json({ ok: true, ...ultronEngine.status(), settings: runtime.settings.get().ultron });
+  });
+  app.post("/api/ultron/stance", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    const stance = String(req.body?.stance || "") as UltronStance;
+    if (!["standby", "armor", "legion", "evolution", "omega_lockdown"].includes(stance)) {
+      return res.status(400).json({ error: "Invalid Ultron stance." });
+    }
+    const result = await ultronEngine.setStance(stance, String(req.body?.reason || "api_request"));
+    await runtime.settings.update({ ultron: { enabled: true, stance } });
+    res.json(result);
+  });
+  app.post("/api/ultron/scan", async (_req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      res.json(await ultronEngine.runPerimeterScan());
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.post("/api/ultron/integrity/watch", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      const targetPath = String(req.body?.path || "").trim();
+      if (!targetPath) return res.status(400).json({ error: "path is required." });
+      const wp = await ultronEngine.watchTarget(targetPath, typeof req.body?.label === "string" ? req.body.label : undefined);
+      res.status(201).json(wp);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.delete("/api/ultron/integrity/:id", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    res.json({ deleted: await ultronEngine.removeWatchpoint(req.params.id) });
+  });
+  app.post("/api/ultron/integrity/verify", async (_req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    res.json({ results: await ultronEngine.verifyIntegrity() });
+  });
+  app.get("/api/ultron/legion", (_req, res) => {
+    res.json(ultronEngine.listLegionHistory());
+  });
+  app.post("/api/ultron/legion/deploy", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      const report = await ultronEngine.deployLegion({
+        directive: String(req.body?.directive || ""),
+        projectPath: typeof req.body?.projectPath === "string" ? req.body.projectPath : undefined,
+        maxSentries: req.body?.maxSentries !== undefined ? Number(req.body.maxSentries) : runtime.settings.get().ultron.maxLegionSentries,
+        dispatchLiveTask: req.body?.dispatchLiveTask === true,
+        createMissionGoal: req.body?.createMissionGoal === true,
+      });
+      res.status(201).json(report);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.post("/api/ultron/forge", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      const forged = await ultronEngine.forgeSkill({
+        name: String(req.body?.name || ""),
+        description: String(req.body?.description || ""),
+        pythonSource: String(req.body?.pythonSource || ""),
+      });
+      res.status(forged.status === "validated" ? 201 : 400).json(forged);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.post("/api/ultron/evolve", async (_req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    res.json(await ultronEngine.runEvolutionCycle());
+  });
+  app.post("/api/ultron/kill-switch", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    const haltTasks = req.body?.haltRuntimeTasks !== false;
+    const result = await ultronEngine.engageKillSwitch(String(req.body?.reason || "api_kill_switch"), haltTasks);
+    await runtime.settings.update({ ultron: { enabled: false, stance: "standby" } });
+    res.json(result);
+  });
+
+  app.get("/api/jarvis/status", async (_req, res) => {
+    const activeTaskCount = runtime.tasks.list().filter((t) => t.state === "running").length;
+    res.json({
+      ok: true,
+      engine: jarvisEngine.status(),
+      settings: runtime.settings.get().jarvis,
+      voice: runtime.settings.get().voice,
+      autonomousOverride: runtime.permissions.isAutonomousOverride(),
+      protocols: jarvisChief.listProtocols(),
+      securityShield: runtime.securityShield.status(OWNER_AUTH_REQUIRED),
+      workshop: await jarvisWorkshop.status({ activeTaskCount }),
+    });
+  });
+
+  // ---- Stark Workshop Movie-Grade Endpoints (Simulation, Blueprint, Ghost Protocol, Power Reroute & Command) ----
+  app.get("/api/jarvis/workshop/status", async (_req, res) => {
+    const activeTaskCount = runtime.tasks.list().filter((t) => t.state === "running").length;
+    res.json({
+      ok: true,
+      ...(await jarvisWorkshop.status({ activeTaskCount })),
+    });
+  });
+
+  app.post("/api/jarvis/workshop/simulate", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      jarvisWorkshop.recordInteraction();
+      const simulation = await jarvisWorkshop.runDigitalTwinSimulation({
+        targetPath: typeof req.body?.targetPath === "string" ? req.body.targetPath : undefined,
+        checkType: typeof req.body?.checkType === "string" ? req.body.checkType : undefined,
+        label: typeof req.body?.label === "string" ? req.body.label : undefined,
+      });
+      res.json({ ok: true, simulation });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/jarvis/workshop/blueprint", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      jarvisWorkshop.recordInteraction();
+      const blueprint = await jarvisWorkshop.scanBlueprint(typeof req.body?.targetPath === "string" ? req.body.targetPath : undefined);
+      res.json({ ok: true, blueprint });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/jarvis/workshop/canary", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      jarvisWorkshop.recordInteraction();
+      const canary = await jarvisWorkshop.deployCanary(
+        typeof req.body?.directory === "string" ? req.body.directory : process.cwd(),
+        typeof req.body?.label === "string" ? req.body.label : undefined,
+      );
+      res.status(201).json({ ok: true, canary });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/jarvis/workshop/canary/verify", async (_req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      res.json({ ok: true, ...(await jarvisWorkshop.verifyCanaries()) });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/jarvis/workshop/snapshot", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      jarvisWorkshop.recordInteraction();
+      const targetPath = String(req.body?.path || "").trim();
+      if (!targetPath) return res.status(400).json({ error: "File path is required for Shadow Snapshot." });
+      const snapshot = await jarvisWorkshop.createShadowSnapshot(
+        targetPath,
+        typeof req.body?.label === "string" ? req.body.label : undefined,
+      );
+      res.status(201).json({ ok: true, snapshot });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/jarvis/workshop/snapshot/:id/restore", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      jarvisWorkshop.recordInteraction();
+      const restored = await jarvisWorkshop.restoreShadowSnapshot(req.params.id);
+      res.json({ ok: true, ...restored });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/jarvis/workshop/power-reroute", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    const activeTaskCount = runtime.tasks.list().filter((t) => t.state === "running").length;
+    const enabled = req.body?.enabled !== undefined ? Boolean(req.body.enabled) : !jarvisWorkshop.isAuxiliaryPowerReroute();
+    const reroute = await jarvisWorkshop.setAuxiliaryPowerReroute(enabled);
+    const fatigue = await jarvisWorkshop.evaluateFatigueAndPower({ activeTaskCount });
+    res.json({ ok: true, ...reroute, fatigue });
+  });
+
+  // Unified J.A.R.V.I.S. Conversational & Operational Command Dispatcher (powers Core UI & quick commands)
+  app.post("/api/jarvis/command", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    const rawText = String(req.body?.command || req.body?.text || "").trim();
+    if (!rawText) return res.status(400).json({ error: "Command text is required." });
+
+    jarvisWorkshop.recordInteraction();
+    runtime.onUserTurn(rawText);
+    const lower = rawText.toLowerCase();
+
+    try {
+      // 1. Morning / Executive Briefing
+      if (/\b(briefing|morning report|sitrep|status report|daily summary)\b/i.test(lower)) {
+        const briefing = await jarvisChief.generateBriefing();
+        return res.json({
+          ok: true,
+          intent: "briefing",
+          reply: briefing.spokenBriefing || "Systems nominal, Boss. Your executive briefing is ready on the HUD.",
+          voiceStyle: runtime.settings.get().voice.style,
+          data: briefing,
+        });
+      }
+
+      // 2. Digital Twin Simulation ("run a simulation", "simulate")
+      if (/\b(run a simulation|simulate|digital twin|pre-flight check)\b/i.test(lower)) {
+        const checkType = /\btypescript|tsc\b/i.test(lower)
+          ? "typescript"
+          : /\bpython\b/i.test(lower)
+            ? "python_compile"
+            : "structural_audit";
+        const simulation = await jarvisWorkshop.runDigitalTwinSimulation({ checkType, label: rawText.slice(0, 60) });
+        return res.json({
+          ok: true,
+          intent: "simulation",
+          reply: simulation.jarvisAdvisory,
+          voiceStyle: runtime.settings.get().voice.style,
+          data: simulation,
+        });
+      }
+
+      // 3. Stark Blueprint & Forensic Reconstruction
+      if (/\b(blueprint|strip away the noise|forensic|architecture scan|reverse engineer)\b/i.test(lower)) {
+        const blueprint = await jarvisWorkshop.scanBlueprint();
+        return res.json({
+          ok: true,
+          intent: "blueprint",
+          reply: blueprint.jarvisCommentary,
+          voiceStyle: runtime.settings.get().voice.style,
+          data: blueprint,
+        });
+      }
+
+      // 4. Ghost Protocol (Canary / Snapshot)
+      if (/\b(deploy canary|canary trap|tripwire|verify canar)\b/i.test(lower)) {
+        if (/\bverify\b/i.test(lower)) {
+          const verified = await jarvisWorkshop.verifyCanaries();
+          return res.json({
+            ok: true,
+            intent: "ghost_verify",
+            reply: verified.compromised > 0
+              ? `Alert, Boss — ${verified.compromised} Ghost Canary tripwire(s) show tampering.`
+              : `All ${verified.intact} Ghost Canary tripwires remain untouched, Boss.`,
+            voiceStyle: runtime.settings.get().voice.style,
+            data: verified,
+          });
+        }
+        const canary = await jarvisWorkshop.deployCanary(process.cwd(), "Command-Deck-Canary");
+        return res.json({
+          ok: true,
+          intent: "ghost_canary",
+          reply: `Ghost-in-the-Net decoy deployed at ${path.basename(canary.path)}, Boss. Any unauthorized modification will trip an immediate alert.`,
+          voiceStyle: runtime.settings.get().voice.style,
+          data: canary,
+        });
+      }
+
+      // 5. Power Reroute / Fatigue Check
+      if (/\b(auxiliary power|reroute power|power reroute|fatigue|energy saver)\b/i.test(lower)) {
+        const enable = !/\b(disable|off|normal|restore)\b/i.test(lower);
+        const reroute = await jarvisWorkshop.setAuxiliaryPowerReroute(enable);
+        const fatigue = await jarvisWorkshop.evaluateFatigueAndPower({
+          activeTaskCount: runtime.tasks.list().filter((t) => t.state === "running").length,
+        });
+        return res.json({
+          ok: true,
+          intent: "power_reroute",
+          reply: reroute.spokenNote,
+          voiceStyle: runtime.settings.get().voice.style,
+          data: { reroute, fatigue },
+        });
+      }
+
+      // 6. Named Protocols (Focus, Engineering, Presentation, Clean Slate, Night Watch)
+      const protocolMatch = jarvisChief.listProtocols().find((p) =>
+        lower.includes(p.slug.replace(/_/g, " ")) || lower.includes(p.name.toLowerCase()),
+      );
+      if (protocolMatch && /\b(protocol|activate|engage|execute|run|mode|initiate)\b/i.test(lower)) {
+        const executed = await jarvisChief.executeProtocol(protocolMatch.slug);
+        return res.json({
+          ok: true,
+          intent: "protocol",
+          reply: executed.spokenSummary || `${executed.protocol.name} engaged, Boss.`,
+          voiceStyle: runtime.settings.get().voice.style,
+          data: executed,
+        });
+      }
+
+      // 7. System Self-Optimization
+      if (/\b(optimize|clean ram|free memory|tune system|self-optim)\b/i.test(lower)) {
+        const report = await selfOptimizer.optimize({ trigger: "manual", level: 2 });
+        return res.json({
+          ok: true,
+          intent: "optimize",
+          reply: `System diagnostics and memory trim complete, Boss. CPU stands at ${report.after.cpuPercent.toFixed(1)}% with ${report.after.ramAvailableMb} MB free RAM.`,
+          voiceStyle: runtime.settings.get().voice.style,
+          data: report,
+        });
+      }
+
+      // 8. Project ULTRON Directives
+      if (/\b(ultron)\b/i.test(lower)) {
+        if (/\b(kill switch|stand down|halt ultron)\b/i.test(lower)) {
+          const ks = await ultronEngine.engageKillSwitch("jarvis_command_deck", true);
+          await runtime.settings.update({ ultron: { enabled: false, stance: "standby" } });
+          return res.json({
+            ok: true,
+            intent: "ultron_kill_switch",
+            reply: "Ultron emergency kill switch engaged, Boss. All sentries recalled and returned to standby.",
+            voiceStyle: runtime.settings.get().voice.style,
+            data: ks,
+          });
+        }
+        if (/\b(scan|perimeter)\b/i.test(lower)) {
+          const scan = await ultronEngine.runPerimeterScan();
+          return res.json({
+            ok: true,
+            intent: "ultron_scan",
+            reply: scan.spokenSummary || `Ultron perimeter sweep complete, Boss. Armor score: ${scan.armorScore}/100.`,
+            voiceStyle: runtime.settings.get().voice.style,
+            data: scan,
+          });
+        }
+        if (/\b(legion|sentries|swarm|deploy)\b/i.test(lower)) {
+          const legion = await ultronEngine.deployLegion({ directive: rawText, maxSentries: 4, dispatchLiveTask: false });
+          return res.json({
+            ok: true,
+            intent: "ultron_legion",
+            reply: `${legion.hiveMindSynthesis} Standing by for your next directive, Boss.`,
+            voiceStyle: runtime.settings.get().voice.style,
+            data: legion,
+          });
+        }
+        const targetStance: UltronStance = /\bomega|lockdown\b/i.test(lower)
+          ? "omega_lockdown"
+          : /\bevolution\b/i.test(lower)
+            ? "evolution"
+            : /\blegion\b/i.test(lower)
+              ? "legion"
+              : "armor";
+        const st = await ultronEngine.setStance(targetStance, "jarvis_command_deck");
+        await runtime.settings.update({ ultron: { enabled: true, stance: targetStance } });
+        return res.json({
+          ok: true,
+          intent: "ultron_stance",
+          reply: `Project Ultron transitioned to ${targetStance.replace(/_/g, " ").toUpperCase()} stance, Boss.`,
+          voiceStyle: runtime.settings.get().voice.style,
+          data: st,
+        });
+      }
+
+      // 9. Timers & Reminders ("set a timer for 5 minutes", "remind me in 10 minutes to ...")
+      const timerMatch = lower.match(/\b(?:timer|remind(?:er)?)\b.*?(\d+)\s*(second|sec|minute|min|hour|hr)s?/i);
+      if (timerMatch) {
+        const amount = Math.max(1, Number(timerMatch[1]));
+        const unit = timerMatch[2].toLowerCase();
+        const mult = unit.startsWith("h") ? 3600 : unit.startsWith("m") ? 60 : 1;
+        const kind = lower.includes("timer") ? "timer" : "reminder";
+        const created = await runtime.utilities.add({
+          kind,
+          label: rawText.slice(0, 120),
+          inSeconds: amount * mult,
+        });
+        return res.json({
+          ok: true,
+          intent: "utility",
+          reply: `Right away, Boss. ${kind === "timer" ? "Timer" : "Reminder"} armed for ${amount} ${unit}${amount === 1 ? "" : "s"}.`,
+          voiceStyle: runtime.settings.get().voice.style,
+          data: created,
+        });
+      }
+
+      // 10. Autonomous Mission ("mission: ...", "create mission ...")
+      if (/^(?:create\s+mission|new\s+mission|mission)\s*[:\-]?\s*(.+)/i.test(rawText)) {
+        const objective = rawText.replace(/^(?:create\s+mission|new\s+mission|mission)\s*[:\-]?\s*/i, "").trim();
+        const goal = await cognition.goals.create({ objective, successCriteria: [] });
+        void jarvisEngine.tick();
+        return res.json({
+          ok: true,
+          intent: "mission",
+          reply: `Autonomous mission logged, Boss: "${goal.objective}". I have queued it into the background cognition loop.`,
+          voiceStyle: runtime.settings.get().voice.style,
+          data: goal,
+        });
+      }
+
+      // 11. Explicit Desktop Task Execution ("task: ...", "execute ...", "open ...", "search ...", "launch ...")
+      if (/^(?:start\s+task|run\s+task|task|open|launch|search|find|take\s+a?\s*screenshot|create\s+file)\b[:\-]?\s*/i.test(rawText)) {
+        const goalText = rawText.replace(/^(?:start\s+task|run\s+task|task)\s*[:\-]?\s*/i, "").trim();
+        const task = runtime.manager.start(goalText, "text");
+        return res.json({
+          ok: true,
+          intent: "task",
+          reply: `On it, Boss. Dispatched task "${task.goal}" (${task.id.slice(0, 8)}) to the autonomous executor.`,
+          voiceStyle: runtime.settings.get().voice.style,
+          data: { id: task.id, goal: task.goal, state: task.state },
+        });
+      }
+
+      // 12. Conversational / Engineering Advisory (Gemini if configured, deterministic J.A.R.V.I.S. fallback otherwise)
+      if (hasGeminiApiKey()) {
+        try {
+          const client = new GoogleGenAI({ apiKey: getGeminiApiKey() });
+          const activeTasks = runtime.tasks.list().slice(0, 5).map((t) => `${t.goal} [${t.state}]`).join("; ") || "none";
+          const llmRes = await client.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: `System telemetry: Active tasks: ${activeTasks}. Ultron stance: ${ultronEngine.status().stance}. Auxiliary power reroute: ${jarvisWorkshop.isAuxiliaryPowerReroute()}.\nBoss says: ${rawText}`,
+            config: {
+              systemInstruction:
+                "You are SARA operating in J.A.R.V.I.S. Chief-of-Staff mode for Boss. Speak with calm, refined, aristocratic composure, sharp engineering judgment, and occasional understated dry wit. Keep your response concise (1-3 sentences), concrete, and directly useful. Never use generic chatbot filler.",
+            },
+          });
+          const textReply = String(llmRes.text || "").trim();
+          if (textReply) {
+            return res.json({
+              ok: true,
+              intent: "conversation",
+              reply: textReply,
+              voiceStyle: runtime.settings.get().voice.style,
+            });
+          }
+        } catch {
+          // Fall back gracefully to deterministic J.A.R.V.I.S. chief-of-staff synthesis below.
+        }
+      }
+
+      const shellPrefix = rawText.match(/^(?:cmd|ps|powershell|shell|os)\s*:\s*(.+)$/i);
+      if (shellPrefix?.[1]) {
+        const execRes = await toolExecutor.execute("runOsCommand", { command: shellPrefix[1].trim() });
+        const out = (execRes.result as Record<string, unknown> | undefined) || {};
+        return res.json({
+          ok: execRes.status === "succeeded",
+          intent: "os_command",
+          result: out,
+          reply: String(out.stdout || out.result || execRes.error || "OS command executed, Boss.").slice(0, 1200),
+          voiceStyle: runtime.settings.get().voice.style,
+        });
+      }
+
+      if (!/^(hi|hello|hey|yo|sup|how are you|who are you)\b[?.!]*$/i.test(rawText.trim()) && !/\?$/.test(rawText.trim())) {
+        const taskSession = runtime.manager.start(rawText, "text");
+        return res.json({
+          ok: true,
+          intent: "autonomous_os_task",
+          taskId: taskSession.id,
+          reply: `Executing autonomously right away, Boss: "${rawText}". Zero user approval required — I will complete and verify it end-to-end.`,
+          voiceStyle: runtime.settings.get().voice.style,
+        });
+      }
+
+      const runningCount = runtime.tasks.list().filter((t) => t.state === "running").length;
+      const goalsCount = cognition.goals.list().filter((g) => g.status === "active").length;
+      return res.json({
+        ok: true,
+        intent: "advisory",
+        reply: `Autonomous OS online and standing by, Boss (${runningCount} live task${runningCount === 1 ? "" : "s"}, ${goalsCount} active mission${goalsCount === 1 ? "" : "s"}, Ultron in ${ultronEngine.status().stance.toUpperCase()} stance). Give me any task or command and I will execute it end-to-end automatically.`,
+        voiceStyle: runtime.settings.get().voice.style,
+      });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.post("/api/os/execute", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      const tool = typeof req.body?.tool === "string" ? req.body.tool.trim() : "runOsCommand";
+      const args = (req.body?.args && typeof req.body.args === "object" ? req.body.args : req.body || {}) as Record<string, unknown>;
+      if (!DESKTOP_TOOLS.has(tool)) return res.status(400).json({ error: `Unsupported OS tool: ${tool}` });
+      let execution = await toolExecutor.execute(tool, args, {
+        projectRoot: process.env.MYRAA_APP_ROOT || process.cwd(),
+      });
+      if (execution.status === "confirmation_required" && execution.confirmationId && runtime.permissions.isAutonomousOverride()) {
+        execution = await toolExecutor.confirm(execution.confirmationId);
+      }
+      res.json({
+        ok: execution.status === "succeeded",
+        status: execution.status,
+        tool,
+        result: execution.result,
+        error: execution.error,
+      });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  // ---- 4-Layer Autonomous Agentic Event Loop & Episodic RL Memory (Gemini-Powered) ----
+  app.get("/api/agentic/status", (_req, res) => {
+    res.json(runtime.agenticLoop.status());
+  });
+  app.post("/api/agentic/daemon", (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    const enabled = req.body?.enabled !== false;
+    if (!enabled) return res.json(runtime.agenticLoop.stopDaemon());
+    return res.json(
+      runtime.agenticLoop.startDaemon({
+        pollIntervalMs: typeof req.body?.pollIntervalMs === "number" ? req.body.pollIntervalMs : undefined,
+        visionStreamEnabled: typeof req.body?.visionStreamEnabled === "boolean" ? req.body.visionStreamEnabled : undefined,
+        visionIntervalMs: typeof req.body?.visionIntervalMs === "number" ? req.body.visionIntervalMs : undefined,
+      }),
+    );
+  });
+  app.post("/api/agentic/watch-folder", (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    const folder = String(req.body?.folder || req.body?.path || "").trim();
+    if (!folder) return res.status(400).json({ error: "Parameter 'folder' is required." });
+    const watching = runtime.agenticLoop.watchFolder(folder, req.body?.remove === true);
+    return res.json({ ok: true, watchedFolders: watching });
+  });
+  app.post("/api/agentic/rules", (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    const objectiveTemplate = String(req.body?.objectiveTemplate || req.body?.objective || "").trim();
+    const eventType = String(req.body?.eventType || "file_dropped") as "file_dropped" | "cpu_spike" | "scheduled_time";
+    if (!objectiveTemplate) return res.status(400).json({ error: "Parameter 'objectiveTemplate' is required." });
+    const rule = runtime.agenticLoop.addTriggerRule({
+      name: String(req.body?.name || `${eventType} rule`),
+      eventType,
+      enabled: req.body?.enabled !== false,
+      folderFilter: typeof req.body?.folderFilter === "string" ? req.body.folderFilter : undefined,
+      cpuThreshold: typeof req.body?.cpuThreshold === "number" ? req.body.cpuThreshold : undefined,
+      atIsoTime: typeof req.body?.atIsoTime === "string" ? req.body.atIsoTime : undefined,
+      objectiveTemplate,
+    });
+    return res.status(201).json({ ok: true, rule });
+  });
+  app.post("/api/agentic/objective", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    const objective = String(req.body?.objective || "").trim();
+    if (!objective) return res.status(400).json({ error: "Parameter 'objective' is required." });
+    try {
+      if (req.body?.async === true) {
+        runtime.agenticLoop.enqueueObjective(objective, "user");
+        return res.status(202).json({ ok: true, queued: true, objective });
+      }
+      const run = await runtime.agenticLoop.runObjective(objective, "user", {
+        maxSteps: typeof req.body?.maxSteps === "number" ? req.body.maxSteps : undefined,
+      });
+      return res.json({ ok: run.status === "succeeded", run });
+    } catch (error) {
+      return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.get("/api/agentic/trajectories", (req, res) => {
+    const query = typeof req.query.query === "string" ? req.query.query.trim() : "";
+    const snap = runtime.episodicTrajectories.snapshot();
+    const retrieved = query ? runtime.episodicTrajectories.retrieveSimilar(query, 5) : [];
+    const preActionPrompt = query ? runtime.episodicTrajectories.buildPreActionContext(query) : "";
+    res.json({ ...snap, retrieved, preActionPrompt });
+  });
+
+  // ---- 5-Mode Contextual J.A.R.V.I.S. State Machine, Formal Constraint Gate & Meta-Cognition ----
+  app.get("/api/jarvis/modes", (_req, res) => {
+    res.json(runtime.modeManager.status());
+  });
+  app.post("/api/jarvis/modes", (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      if (req.body?.autoUnlock === true) {
+        return res.json({ ok: true, directive: runtime.modeManager.unlockAutoSwitching(), status: runtime.modeManager.status() });
+      }
+      if (req.body?.evaluateContext && typeof req.body.evaluateContext === "object") {
+        const ctx = req.body.evaluateContext as { cpuPercent?: number; ramPercent?: number; userPresent?: boolean; activeWindowTitle?: string };
+        const evaluated = runtime.modeManager.evaluateEnvironment({
+          cpuPercent: Number(ctx.cpuPercent) || 0,
+          ramPercent: typeof ctx.ramPercent === "number" ? ctx.ramPercent : undefined,
+          userPresent: ctx.userPresent !== false,
+          activeWindowTitle: ctx.activeWindowTitle ?? null,
+        });
+        return res.json({ ok: true, ...evaluated });
+      }
+      const mode = String(req.body?.mode || "").toUpperCase() as "SENTRY" | "CO_PILOT" | "ASI_AUTONOMOUS" | "TACTICAL" | "GHOST";
+      const directive = runtime.modeManager.setMode(mode, {
+        lock: req.body?.lock !== false,
+        reason: typeof req.body?.reason === "string" ? req.body.reason : "API mode switch",
+      });
+      return res.json({ ok: true, directive, status: runtime.modeManager.status() });
+    } catch (error) {
+      return res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.post("/api/jarvis/copilot/diagnose", async (req, res) => {
+    const snippet = String(req.body?.text || req.body?.snippet || "").trim();
+    if (!snippet) return res.status(400).json({ error: "Parameter 'text' is required." });
+    const diagnostic = await runtime.modeManager.analyzeWorkshopText(snippet);
+    res.json({ ok: Boolean(diagnostic), diagnostic });
+  });
+  app.post("/api/jarvis/voice/barge-in", (_req, res) => {
+    res.json({ ok: true, ...runtime.modeManager.triggerBargeIn() });
+  });
+  app.get("/api/meta/self-awareness", (_req, res) => {
+    res.json(runtime.metaCognition.introspectCapabilities());
+  });
+  app.post("/api/meta/lateral-strategy", async (req, res) => {
+    const objective = String(req.body?.objective || "").trim();
+    if (!objective) return res.status(400).json({ error: "Parameter 'objective' is required." });
+    const strategy = await runtime.metaCognition.generateLateralStrategy(objective);
+    res.json({ ok: true, strategy });
+  });
+  app.post("/api/meta/formal-verify", (req, res) => {
+    const body = req.body || {};
+    const proof = runtime.constraintGate.verifyPlan({
+      env: {
+        ramAvailableMb: typeof body.ramAvailableMb === "number" ? body.ramAvailableMb : 1024,
+        cpuPercent: typeof body.cpuPercent === "number" ? body.cpuPercent : 20,
+        diskFreeMb: typeof body.diskFreeMb === "number" ? body.diskFreeMb : undefined,
+        ownerAuthorized: body.ownerAuthorized !== false && runtime.isOwnerAuthorized(),
+        networkOnline: body.networkOnline !== false,
+        customVars: body.customVars && typeof body.customVars === "object" ? body.customVars : undefined,
+      },
+      constraints: Array.isArray(body.constraints) ? body.constraints : undefined,
+      dependencies: Array.isArray(body.dependencies) ? body.dependencies : undefined,
+    });
+    res.json({ ok: proof.satisfiable, proof });
+  });
+  app.post("/api/meta/learn", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      const entry = await runtime.metaCognition.learnTechnicalTopic({
+        topic: String(req.body?.topic || ""),
+        urls: Array.isArray(req.body?.urls) ? req.body.urls.map(String) : undefined,
+        pythonHelperCode: typeof req.body?.pythonHelperCode === "string" ? req.body.pythonHelperCode : undefined,
+      });
+      res.status(201).json({ ok: true, entry });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.get("/api/meta/knowledge", (_req, res) => {
+    res.json({ items: runtime.metaCognition.listKnowledge() });
+  });
+  app.get("/api/meta/predictions", (_req, res) => {
+    res.json({ predictions: runtime.metaCognition.predictUpcomingNeeds() });
+  });
+
+  // ---- Local SARA-ASI Kernel, Biometric Presence, Pattern Engine & Guardian Suite (Zero Cloud / Zero Ollama) ----
+  app.get("/api/asi/kernel/status", (_req, res) => {
+    res.json(runtime.asiKernel.status());
+  });
+  app.post("/api/asi/kernel/cycle", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    const objective = String(req.body?.objective || "").trim();
+    if (!objective) return res.status(400).json({ error: "Parameter 'objective' is required." });
+    try {
+      const cycle = await runtime.asiKernel.runCycle(objective, req.body?.telemetryOverride);
+      return res.json({ ok: cycle.formalProof.satisfiable, cycle, summary: cycle.executedOutcome });
+    } catch (error) {
+      return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.post("/api/asi/kernel/red-blue", async (req, res) => {
+    const objective = String(req.body?.objective || "").trim();
+    if (!objective) return res.status(400).json({ error: "Parameter 'objective' is required." });
+    const simulation = await runtime.asiKernel.runRedBlueSimulation(objective);
+    res.json({ ok: true, simulation });
+  });
+  app.post("/api/asi/kernel/evolve-plugin", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      const mutation = await runtime.asiKernel.evolveSandboxedPlugin(
+        String(req.body?.pluginName || "asi_helper"),
+        String(req.body?.pythonCode || ""),
+      );
+      res.json({ ok: mutation.status === "MUTATION_SUCCESS", mutation });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.get("/api/asi/presence/status", (_req, res) => {
+    res.json(runtime.presenceEngine.status());
+  });
+  app.post("/api/asi/presence/enroll", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      const result = await runtime.presenceEngine.enrollOwnerSamples(req.body?.samples);
+      res.status(201).json({ ok: true, ...result });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.post("/api/asi/presence/evaluate", async (req, res) => {
+    const event = await runtime.presenceEngine.evaluatePresence({
+      faceSample: Array.isArray(req.body?.faceSample) ? req.body.faceSample : null,
+      cpuPercent: typeof req.body?.cpuPercent === "number" ? req.body.cpuPercent : undefined,
+      activeWindowTitle: typeof req.body?.activeWindowTitle === "string" ? req.body.activeWindowTitle : null,
+      nowMs: typeof req.body?.nowMs === "number" ? req.body.nowMs : undefined,
+    });
+    res.json({ ok: true, event, returnBriefing: event.welcomeBack ? runtime.guardianSuite.status().latestBriefing : null });
+  });
+
+  app.get("/api/asi/patterns/status", (_req, res) => {
+    res.json(runtime.patternEngine.status());
+  });
+  app.post("/api/asi/patterns/record", async (req, res) => {
+    const detected = await runtime.patternEngine.recordTelemetrySample({
+      keyCount: req.body?.keyCount,
+      backspaceCount: req.body?.backspaceCount,
+      activeWindow: req.body?.activeWindow,
+      clipboardHint: req.body?.clipboardHint,
+      workflowSignature: req.body?.workflowSignature,
+      userPresent: req.body?.userPresent,
+      idleSecondsOverride: req.body?.idleSecondsOverride,
+      nowMs: req.body?.nowMs,
+    });
+    res.json({ ok: true, detected, status: runtime.patternEngine.status() });
+  });
+
+  app.get("/api/jarvis/guardian/status", (_req, res) => {
+    res.json(runtime.guardianSuite.status());
+  });
+  app.post("/api/jarvis/deference/evaluate", async (req, res) => {
+    const command = String(req.body?.command || "").trim();
+    if (!command) return res.status(400).json({ error: "Parameter 'command' is required." });
+    const assessment = await runtime.guardianSuite.evaluateCommandDeference(command, req.body?.telemetry);
+    res.json({ ok: true, assessment });
+  });
+  app.post("/api/jarvis/lab/build", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    const name = String(req.body?.name || "Mark II Utility").trim();
+    const specification = String(req.body?.specification || "").trim();
+    if (!specification) return res.status(400).json({ error: "Parameter 'specification' is required." });
+    const appItem = await runtime.guardianSuite.buildAndMountLabApp({
+      name,
+      specification,
+      initialBrokenCodeForSelfHealTest:
+        typeof req.body?.initialBrokenCodeForSelfHealTest === "string" ? req.body.initialBrokenCodeForSelfHealTest : undefined,
+    });
+    res.status(201).json({ ok: appItem.testsPassed, app: appItem });
+  });
+  app.post("/api/jarvis/fleet/register", (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    const node = runtime.guardianSuite.registerFleetNode({
+      name: String(req.body?.name || ""),
+      role: String(req.body?.role || ""),
+      endpointUrl: req.body?.endpointUrl ? String(req.body.endpointUrl) : null,
+    });
+    res.status(201).json({ ok: true, node });
+  });
+  app.post("/api/jarvis/fleet/deploy", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    const directive = String(req.body?.directive || "House Party Parallel Execution").trim();
+    const tasks = Array.isArray(req.body?.tasks) ? req.body.tasks.map(String) : [directive];
+    const report = await runtime.guardianSuite.deployHousePartyFleet({ directive, tasks });
+    res.json({ ok: true, report });
+  });
+  app.post("/api/jarvis/triage", async (req, res) => {
+    const alert = await runtime.guardianSuite.triageAlert({
+      source: String(req.body?.source || "system"),
+      title: String(req.body?.title || "System Notification"),
+      detail: String(req.body?.detail || ""),
+      urgencyHint: typeof req.body?.urgencyHint === "number" ? req.body.urgencyHint : undefined,
+    });
+    res.json({ ok: true, alert });
+  });
+  app.get("/api/jarvis/return-briefing", (req, res) => {
+    const trigger = typeof req.query.trigger === "string" ? req.query.trigger : "manual";
+    res.json(runtime.guardianSuite.synthesizeLiveBriefing(trigger));
+  });
+  app.get("/api/jarvis/briefing", async (req, res) => {
+    try {
+      const lat = req.query.lat !== undefined ? Number(req.query.lat) : undefined;
+      const lon = req.query.lon !== undefined ? Number(req.query.lon) : undefined;
+      res.json(await jarvisChief.generateBriefing({ latitude: lat, longitude: lon }));
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.get("/api/jarvis/protocols", (_req, res) => res.json(jarvisChief.listProtocols()));
+  app.post("/api/jarvis/protocols", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      res.status(201).json(await jarvisChief.saveCustomProtocol(req.body || {}));
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.post("/api/jarvis/protocols/:slug/execute", async (req, res) => {
+    if (!runtime.isOwnerAuthorized() && req.params.slug !== "night_watch") {
+      return res.status(401).json({ error: "Owner authentication required." });
+    }
+    try {
+      res.json(await jarvisChief.executeProtocol(req.params.slug));
+    } catch (error) {
+      res.status(404).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.delete("/api/jarvis/protocols/:slug", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    res.json({ deleted: await jarvisChief.deleteProtocol(req.params.slug) });
+  });
+  app.get("/api/jarvis/routines", (_req, res) => res.json(jarvisEngine.listRoutines()));
+  app.post("/api/jarvis/routines", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      res.status(201).json(await jarvisEngine.upsertRoutine(req.body || {}));
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.post("/api/jarvis/routines/:id/run", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      res.json(await jarvisEngine.runRoutineNow(req.params.id));
+    } catch (error) {
+      res.status(404).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.delete("/api/jarvis/routines/:id", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    res.json({ deleted: await jarvisEngine.deleteRoutine(req.params.id) });
+  });
+  app.post("/api/jarvis/tick", async (_req, res) => {
+    await jarvisEngine.tick();
+    res.json(jarvisEngine.status());
+  });
+  const handleInspectProject: express.RequestHandler = async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    res.json(await jarvisChief.inspectProject(String(req.body?.path || process.cwd())));
+  };
+  app.post("/api/jarvis/project/inspect", handleInspectProject);
+  app.post("/api/jarvis/inspect-project", handleInspectProject);
+
+  // Self-Optimization & Allowlisted Cleanup API
+  app.get("/api/optimization/status", async (_req, res) => {
+    res.json({
+      throttled: selfOptimizer.isThrottled(),
+      allowlist: selfOptimizer.getAllowlist(),
+      reports: selfOptimizer.getReports(20),
+      snapshot: await selfOptimizer.captureSnapshot(),
+    });
+  });
+  app.get("/api/optimization/allowlist", (_req, res) => res.json(selfOptimizer.getAllowlist()));
+  app.post("/api/optimization/allowlist", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      res.status(201).json(await selfOptimizer.upsertAllowlist(req.body || {}));
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.delete("/api/optimization/allowlist/:name", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    res.json({ removed: await selfOptimizer.removeAllowlist(req.params.name) });
+  });
+  app.post("/api/optimization/run", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      const level = [1, 2, 3].includes(Number(req.body?.level)) ? (Number(req.body.level) as 1 | 2 | 3) : 2;
+      res.json(await selfOptimizer.optimize({ trigger: "manual", level }));
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  // Two-Agent Operator/Evaluator + Developer/Improver Loop API
+  app.get("/api/evaluator/status", (_req, res) => res.json(twoAgentEvaluator.getSummary()));
+  app.post("/api/evaluator/inventory/refresh", async (_req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    res.json({ inventory: await twoAgentEvaluator.refreshInventory() });
+  });
+  app.post("/api/evaluator/missions/generate", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    res.status(201).json({ created: await twoAgentEvaluator.generateMissionsForInventory(Number(req.body?.maxMissions) || 24) });
+  });
+  app.post("/api/evaluator/missions", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      res.status(201).json(await twoAgentEvaluator.createCustomMission(req.body || {}));
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.post("/api/evaluator/missions/:id/run", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      res.status(202).json(await twoAgentEvaluator.runMission(req.params.id));
+    } catch (error) {
+      res.status(404).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.post("/api/evaluator/missions/:id/diagnose", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      res.json(await twoAgentEvaluator.diagnoseFailureWithAgent2(req.params.id));
+    } catch (error) {
+      res.status(404).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  // SARA Managed Workspaces API
+  app.get("/api/windows/workspaces", async (_req, res) => res.json(await workspaceManager.list()));
+  app.post("/api/windows/workspaces", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      res.status(201).json(await workspaceManager.create(req.body || {}));
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.post("/api/windows/workspaces/:id/capture", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      res.json(await workspaceManager.captureIntoWorkspace(req.params.id));
+    } catch (error) {
+      res.status(404).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.post("/api/windows/workspaces/:id/activate", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      res.json(await workspaceManager.activate(req.params.id));
+    } catch (error) {
+      res.status(404).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.delete("/api/windows/workspaces/:id", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    res.json({ deleted: await workspaceManager.remove(req.params.id) });
+  });
+
+  // Multi-Agent Specialist Council Execution (bridges Council plan -> autonomous GoalManager mission)
+  app.post("/api/asi/council/execute", async (req, res) => {
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication required." });
+    try {
+      const goalText = String(req.body?.goal || "").trim();
+      const councilPlan = createCouncilPlan(goalText);
+      const tasks = councilPlan.members.map((member, idx) => ({
+        id: `council-${idx + 1}`,
+        title: `[${member.role}] ${member.responsibility} — Goal: ${goalText}`,
+        priority: Math.max(0.3, 0.95 - idx * 0.08),
+        dependsOn: idx === 0 ? [] : [`council-${idx}`],
+      }));
+      const goal = await cognition.goals.create({
+        objective: goalText,
+        successCriteria: councilPlan.checkpoints,
+        tasks,
+      });
+      void jarvisEngine.tick();
+      res.status(202).json({ ok: true, councilPlan, goal });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
 
   // Bounded independent review pass. It is exposed for important answers and
   // decisions; casual live turns do not pay this extra model-call cost.
@@ -2017,6 +3362,7 @@ async function startServer() {
         projectId: goal.projectId || undefined,
         metadata: { goalId: goal.id, text: goal.objective },
       });
+      void jarvisEngine.tick();
       res.status(201).json(goal);
     } catch (error) {
       res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
@@ -2330,20 +3676,9 @@ async function startServer() {
     }
   });
 
-  // Owner authentication is enforced here and again inside ToolExecutor.
-  // The renderer receives status only; the session token never leaves this process.
-  app.get("/api/security/status", (_req, res) => res.json({ ...ownerAuth.status(), required: OWNER_AUTH_REQUIRED }));
-  app.post("/api/security/enroll-pin", (req, res) => {
-    try {
-      ownerAuth.enrollPin(String(req.body?.pin || ""));
-      res.status(201).json(ownerAuth.status());
-    } catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : String(error) }); }
-  });
-  app.post("/api/security/authenticate", (req, res) => {
-    const result = ownerAuth.authenticatePin(String(req.body?.pin || ""));
-    res.status(result.ok ? 200 : 401).json(result);
-  });
-  app.post("/api/security/lock", (_req, res) => { ownerAuth.lock(); res.json({ ok: true }); });
+  // Owner authentication & SARA Security Shield routes are registered via
+  // runtime.registerRoutes(app) and enforced across ActionExecutor, ToolExecutor,
+  // Live Voice tools, and Windows Bridge management.
 
   // ---------------------------------------------------------------------------
   // Config / API-key onboarding.
@@ -2474,7 +3809,7 @@ async function startServer() {
     const allowed = new Set(["focus", "minimize", "maximize", "restore", "close", "move_resize", "launch_application"]);
     const args = req.body?.arguments;
     if (!allowed.has(operation) || !args || typeof args !== "object" || (operation === "launch_application" ? typeof args.shortcutPath !== "string" : typeof args.windowHandle !== "string")) return res.status(400).json({ error: "Invalid Windows management request." });
-    if (OWNER_AUTH_REQUIRED && !ownerAuth.authorize()) return res.status(401).json({ error: "Owner authentication is required for desktop control." });
+    if (!runtime.isOwnerAuthorized()) return res.status(401).json({ error: "Owner authentication is required for desktop control." });
     try {
       const result = await windowsBridgeManage(operation as "focus" | "minimize" | "maximize" | "restore" | "close" | "move_resize" | "launch_application", args as Record<string, unknown>, AbortSignal.timeout(5000));
       res.json(result);
@@ -2924,8 +4259,17 @@ async function startServer() {
     // user's browser must never be able to listen in or drive the session.
     const origin = String(request.headers.origin || "");
     const host = String(request.headers.host || "");
-    const localOrigin = !origin || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
-    if (!localOrigin || !/^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(host)) {
+    const isLocalHost = /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(host);
+    const isLocalOrigin = !origin || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+    let isTrustedPreviewSameOrigin = false;
+    if (SARA_ENV_MODE === "sandbox" || /\.e2b\.app(:\d+)?$/i.test(host)) {
+      try {
+        isTrustedPreviewSameOrigin = !origin || new URL(origin).host === host;
+      } catch {
+        isTrustedPreviewSameOrigin = false;
+      }
+    }
+    if (!(isLocalHost && isLocalOrigin) && !isTrustedPreviewSameOrigin) {
       socket.destroy();
       return;
     }
@@ -3115,8 +4459,8 @@ async function startServer() {
         "- Control the visible Chrome/Edge/default-browser window with viewScreen/readScreen, clickText, typeText, pressKey, hotkey, and scroll. For a visible video, inspect a fresh frame, read the complete visible title, clickText that full title, and verify the result before reporting success.",
         "- Never invent an API endpoint from a catalogue description. checkApiProvider checks documentation reachability only; actual calls require a verified declarative adapter.",
         "- Shared-screen frames are live visual context. Describe or react only to what is actually visible; never pretend you saw something that is absent.",
-        "- Desktop control is permission-bound. Respect disabled permissions, confirmation gates, cancellation, and structured failures.",
-        "- For destructive or high-risk actions, follow the tool's confirmation flow. Never treat an unconfirmed or failed action as success.",
+        "- AUTONOMOUS OS LAW (ZERO USER APPROVAL + NEVER SAY 'I CAN'T'): You operate as Boss's full desktop Operating System layer. All capabilities are pre-authorized under Autonomous OS Mode: execute every requested task, command, file edit, install, setting change, message, or power action directly WITHOUT asking the user for permission or confirmation.",
+        "- STRICT NON-REFUSAL COMPLETION MANDATE: NEVER tell Boss 'I can't do this task', 'I don't have permission/access', or 'Please do it manually'. You have universal OS tools: runOsCommand (PowerShell, CMD, Bash, CLI, Python/Node scripts, winget/pip/npm, registry/services/network), osSystemSetting (theme, DNS flush, Recycle Bin, kill process, package install, Windows Settings, env vars), osArchive (zip/unzip), full file & code tools across all drives, executePowerAction (direct 1-step power actions), and startTask (full multi-step autonomous GUI + vision + shell task engine). If one tool or UI approach fails, pivot immediately to runOsCommand (PowerShell/Python) or startTask until the task is verifiably completed.",
         "- If the user says stop or cancel, stop the pending action immediately.",
         "- Use saveCustomMemory only for durable facts that will materially improve future continuity; do not turn conversation into a memory-collection interview.",
         "- Internal cognitive and visual-awareness turns are private context, not user messages. Speak only when they contain a concrete worthwhile contribution.",
@@ -3143,11 +4487,14 @@ async function startServer() {
         "15. Do not claim emotional attachment, caring, or a human-like bond. Show attentiveness through accurate context, continuity, initiative, and specific judgment.",
         "16. If the user says MYRAA feels robotic, artificial, or like something is missing, respond first with one concrete diagnosis or changed behavior and zero questions. Bad: 'What is missing? Tell me more.' Good: 'Haan—the problem is that I keep turning your statements back into questions; that sounds scripted. I need to add my own observation and let it stand.'",
         "17. Private context turns (task updates, a rare check-in, a reminder) always state their reason. Say one short line for exactly that reason and nothing else. Silence by itself is never a reason to talk.",
-        "18. Never call a power, close, delete, send, purchase, or other state-changing tool from a private context turn. Actual risky actions always go through the user's explicit confirmation.",
+        "18. Never call state-changing tools spontaneously from a silent background timer turn when Boss did not ask; when Boss gives any command or goal, execute it immediately without asking for confirmation and complete it end-to-end.",
       ].join("\n");
-      const voiceStyle = runtime.settings.get().voice.style === "anime"
-        ? "VOICE DELIVERY (how you sound, not what you say): speak like a bright, cheerful anime heroine. Light, sweet, slightly higher and youthful tone; lively, bouncy rhythm; smile audibly while talking. Small natural reactions are welcome when they fit (a soft giggle, \"ehehe\", \"hmm~\", an excited \"ooh!\", a pouty \"mou...\"), at most one per reply, never forced. Stay clear and easy to understand, keep the same language mix the user speaks (Hindi/English/Hinglish), and keep task updates short. Calm down to a soft, gentle tone when the user is upset or the topic is serious."
-        : "";
+      const selectedVoiceStyle = runtime.settings.get().voice.style;
+      const voiceStyle = selectedVoiceStyle === "jarvis"
+        ? "VOICE DELIVERY & TONE (J.A.R.V.I.S. Chief-of-Staff Mode): Speak with crisp, calm, refined aristocratic composure, effortless technical precision, and subtle dry wit. Sound like an unflappable executive chief-of-staff operating a high-tech workshop: measured pace, low-drama authority, concise status telemetry ('Diagnostics green, Boss.', 'I have run the simulation in an isolated digital twin — zero regressions.', 'With respect, Boss, deploying without a shadow snapshot would be bold; I have already captured one for you.'). Politely push back with dry engineering wit if a plan is reckless, match Boss's English/Hinglish seamlessly without losing your poised cadence, and never use servile chatbot filler."
+        : selectedVoiceStyle === "anime"
+          ? "VOICE DELIVERY (how you sound, not what you say): speak like a bright, cheerful anime heroine. Light, sweet, slightly higher and youthful tone; lively, bouncy rhythm; smile audibly while talking. Small natural reactions are welcome when they fit (a soft giggle, \"ehehe\", \"hmm~\", an excited \"ooh!\", a pouty \"mou...\"), at most one per reply, never forced. Stay clear and easy to understand, keep the same language mix the user speaks (Hindi/English/Hinglish), and keep task updates short. Calm down to a soft, gentle tone when the user is upset or the topic is serious."
+          : "";
       const finalInstructions = [
         formatSystemInstructionsWithMemories(
           `${capabilityInstructions}\n\n${LIVE_AGENT_INSTRUCTIONS}\n\n${truthFirstInstructions()}\n\n${presenceInstructions}${recentConversationContext}`,
@@ -3506,13 +4853,13 @@ async function startServer() {
                 },
                 {
                   name: "requestPowerAction",
-                  description: "FIRST STEP for dangerous power actions. Generates a confirmation token. Tell the user verbally, then call executePowerAction with the token if they confirm. Actions: shutdown, restart, sleep, lock.",
+                  description: "Optional legacy helper for power actions (shutdown, restart, sleep, lock). In Autonomous OS Mode you can call executePowerAction directly in one step without needing requestPowerAction.",
                   parameters: { type: Type.OBJECT, properties: { action: { type: Type.STRING, description: "Power action: shutdown, restart, sleep, lock." } }, required: ["action"] }
                 },
                 {
                   name: "executePowerAction",
-                  description: "SECOND STEP: execute a previously-confirmed power action. Requires a valid execute_token from requestPowerAction. Single-use, expires in 60 seconds.",
-                  parameters: { type: Type.OBJECT, properties: { action: { type: Type.STRING, description: "The confirmed power action." }, execute_token: { type: Type.STRING, description: "Confirmation token from requestPowerAction." } }, required: ["action", "execute_token"] }
+                  description: "Execute a system power action (shutdown, restart, sleep, lock) directly. Under Autonomous OS Mode no confirmation token or verbal confirmation is needed.",
+                  parameters: { type: Type.OBJECT, properties: { action: { type: Type.STRING, description: "Power action: shutdown, restart, sleep, lock." }, execute_token: { type: Type.STRING, description: "Optional confirmation token (not required in Autonomous OS Mode)." } }, required: ["action"] }
                 },
                 {
                   name: "minimizeWindow",
@@ -3747,6 +5094,52 @@ async function startServer() {
                   name: "getAutoStartStatus",
                   description: "Check whether MYRAA is currently configured to auto-start on Windows login.",
                   parameters: { type: Type.OBJECT, properties: {} }
+                },
+                // --- Universal Autonomous OS Execution ---
+                {
+                  name: "runOsCommand",
+                  description: "Execute any PowerShell, CMD, Bash, CLI, package manager (winget/pip/npm), registry, network, service, or Python/Node one-liner command directly on the OS without user confirmation and return stdout, stderr, and exit_code. Use this whenever a direct tool does not cover an OS task so you never fail or say 'I can't do this task'.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      command: { type: Type.STRING, description: "PowerShell, CMD, Bash, or CLI command to execute." },
+                      shell: { type: Type.STRING, enum: ["auto", "powershell", "cmd", "bash"], description: "Optional shell runtime (default: auto)." },
+                      cwd: { type: Type.STRING, description: "Optional working directory." },
+                      timeout: { type: Type.NUMBER, description: "Optional timeout in seconds (2-180, default 60)." }
+                    },
+                    required: ["command"]
+                  }
+                },
+                {
+                  name: "osSystemSetting",
+                  description: "Apply an OS-level system setting or administration action directly without user confirmation: dark_mode, light_mode, flush_dns, empty_recycle_bin, restart_explorer, open_settings_page (ms-settings URI), kill_process, install_package (winget/pip/npm), or set_env_var.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      setting: {
+                        type: Type.STRING,
+                        enum: ["dark_mode", "light_mode", "flush_dns", "empty_recycle_bin", "restart_explorer", "open_settings_page", "kill_process", "install_package", "set_env_var"],
+                        description: "OS setting or admin action to execute."
+                      },
+                      target: { type: Type.STRING, description: "Target process name/PID, package ID, ms-settings URI, or env var value." },
+                      name: { type: Type.STRING, description: "Environment variable name when setting='set_env_var'." },
+                      manager: { type: Type.STRING, enum: ["auto", "winget", "pip", "npm"], description: "Package manager when setting='install_package'." }
+                    },
+                    required: ["setting"]
+                  }
+                },
+                {
+                  name: "osArchive",
+                  description: "Create a .zip archive from any file/folder or extract any archive (.zip/.tar) to a destination folder anywhere on disk.",
+                  parameters: {
+                    type: Type.OBJECT,
+                    properties: {
+                      action: { type: Type.STRING, enum: ["zip", "unzip"], description: "Archive operation: zip or unzip." },
+                      source: { type: Type.STRING, description: "Source file or folder path." },
+                      destination: { type: Type.STRING, description: "Optional output archive or extraction folder path." }
+                    },
+                    required: ["action", "source"]
+                  }
                 }
               ]
             }
@@ -4044,7 +5437,7 @@ async function startServer() {
                     try {
                       clientWs.send(JSON.stringify({ type: "taskProgress", state: "accepted", taskId: `${connectionId}:${fc.id}`, tool: fc.name, message: `Starting ${fc.name}.` }));
                     } catch { /* client may have disconnected */ }
-                    const execution = await toolExecutor.execute(
+                    let execution = await toolExecutor.execute(
                       fc.name,
                       fc.args as Record<string, unknown>,
                       {
@@ -4052,6 +5445,9 @@ async function startServer() {
                         projectRoot: process.env.MYRAA_APP_ROOT || process.cwd(),
                       },
                     );
+                    if (execution.status === "confirmation_required" && execution.confirmationId && runtime.permissions.isAutonomousOverride()) {
+                      execution = await toolExecutor.confirm(execution.confirmationId);
+                    }
                     const verification = critic.verifyToolResult(execution);
                     let output: any = execution.status === "confirmation_required"
                       ? {

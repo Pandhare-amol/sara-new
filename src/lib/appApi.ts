@@ -63,12 +63,13 @@ export interface ConfirmationRequest {
 }
 
 export type Decision = "allow" | "ask" | "deny";
-export type MessageConfirmationMode = "always_confirm" | "confirm_new_recipients" | "trusted_without_confirmation" | "never_without_preview";
+export type MessageConfirmationMode = "always_confirm" | "confirm_new_recipients" | "trusted_without_confirmation" | "never_without_preview" | "autonomous_no_confirm";
 
 export interface PermissionsView {
   policy: {
     capabilities: Record<string, { decision: Decision }>;
     messageConfirmation: MessageConfirmationMode;
+    autonomousOverride?: boolean;
   };
   info: Record<string, { label: string; description: string; risk: "low" | "medium" | "high" }>;
 }
@@ -126,8 +127,29 @@ export interface AppSettings {
     autoDndRecording: boolean;
   };
   autonomy: { maxSteps: number; conflictWaitSec: number; emergencyShortcut: string; assistantShortcut: string; showTaskHud: boolean; keepRunningInBackground: boolean };
+  jarvis: {
+    autonomousMode: boolean;
+    zeroConfirmationPrompts: boolean;
+    proactiveJarvis: boolean;
+    multiMethodFallback: boolean;
+    autoExecuteGoals: boolean;
+    surfaceMode: "companion" | "live_core" | "sara_os";
+    shieldEnabled: boolean;
+    requireEnrollmentBeforeUse: boolean;
+    independentGuard: boolean;
+    welcomeOnUnlock: boolean;
+    lockdownShortcut: string;
+  };
+  ultron: {
+    enabled: boolean;
+    stance: "standby" | "armor" | "legion" | "evolution" | "omega_lockdown";
+    patrolIntervalMin: number;
+    maxLegionSentries: number;
+    autoIntegrityGuard: boolean;
+    selfEvolutionEnabled: boolean;
+  };
   humanLike: { observeVerifyActions: boolean; smoothMouseMovement: boolean; naturalTypingPauses: boolean; pauseOnUserInput: boolean; stuckActionLimit: number; conciseProgressUpdates: boolean };
-  voice: { voiceName: string; style: "natural" | "anime"; pitch: number; bargeIn: boolean; speakTaskUpdates: "all" | "important" | "none" };
+  voice: { voiceName: string; style: "jarvis" | "natural" | "anime"; pitch: number; bargeIn: boolean; speakTaskUpdates: "all" | "important" | "none" };
   companion: {
     enabled: boolean;
     setupComplete: boolean;
@@ -209,6 +231,7 @@ export const api = {
 
   permissions: () => request<PermissionsView>("GET", "/api/permissions"),
   setPermission: (capability: string, decision: Decision) => request<unknown>("POST", `/api/permissions/${encodeURIComponent(capability)}`, { decision }),
+  setAutonomousPermissions: (enabled: boolean) => request<{ ok: boolean; autonomousOverride: boolean }>("POST", "/api/permissions/autonomous", { enabled }),
   setMessageConfirmation: (mode: MessageConfirmationMode) => request<unknown>("POST", "/api/permissions/messaging", { mode }),
 
   models: () => request<ModelCatalogue>("GET", "/api/models"),
@@ -219,11 +242,55 @@ export const api = {
 
   appSettings: () => request<AppSettings>("GET", "/api/app-settings"),
   updateAppSettings: (patch: AppSettingsPatch) => request<AppSettings>("POST", "/api/app-settings", patch),
-  securityStatus: () => request<{ enrolled: boolean; authenticated: boolean; required?: boolean; methods: { pin: boolean; face: false; voice: false; windowsHello: false }; lockedUntil: number | null }>("GET", "/api/security/status"),
+  securityStatus: () => request<{
+    enrolled: boolean;
+    authenticated: boolean;
+    required?: boolean;
+    gateActive?: boolean;
+    authorized?: boolean;
+    passphraseEnrolled?: boolean;
+    recoveryCodeConfigured?: boolean;
+    lockdownActive?: boolean;
+    intrusionCount?: number;
+    methods: { pin: boolean; face: false; voice: false; windowsHello: false };
+    lockedUntil: number | null;
+  }>("GET", "/api/security/status"),
   enrollOwnerPin: (pin: string) => request<unknown>("POST", "/api/security/enroll-pin", { pin }),
+  enrollOwnerPassphrase: (passphrase: string, currentSecret?: string) =>
+    request<{ ok: boolean; recoveryCode?: string }>("POST", "/api/security/enroll-passphrase", { passphrase, currentSecret }),
+  generateRecoveryCode: (secret: string) => request<{ ok: boolean; recoveryCode: string }>("POST", "/api/security/recovery-code", { secret }),
   authenticateOwnerPin: (pin: string) => request<{ ok: boolean; reason?: string; retryAfterMs?: number }>("POST", "/api/security/authenticate", { pin }),
   lockSara: () => request<unknown>("POST", "/api/security/lock"),
+  lockdownSara: () => request<unknown>("POST", "/api/security/lockdown", { reason: "ui_lockdown" }),
   setDnd: (active: boolean) => request<unknown>("POST", "/api/dnd", { active }),
+
+  jarvisStatus: () => request<Record<string, any>>("GET", "/api/jarvis/status"),
+  jarvisBriefing: () => request<Record<string, any>>("GET", "/api/jarvis/briefing"),
+  jarvisProtocols: () => request<Array<{ id: string; slug: string; name: string; description: string; builtIn: boolean; executionCount: number }>>("GET", "/api/jarvis/protocols"),
+  executeProtocol: (slug: string) => request<{ ok: boolean; spokenSummary: string; executedSteps: Array<{ step: string; ok: boolean; detail: string }> }>("POST", `/api/jarvis/protocols/${encodeURIComponent(slug)}/execute`),
+  optimizeSystem: (level: 1 | 2 | 3 = 2) => request<Record<string, any>>("POST", "/api/optimization/run", { level }),
+  optimizationStatus: () => request<Record<string, any>>("GET", "/api/optimization/status"),
+  evaluatorStatus: () => request<Record<string, any>>("GET", "/api/evaluator/status"),
+  refreshAppInventory: () => request<Record<string, any>>("POST", "/api/evaluator/inventory/refresh"),
+  generateEvaluatorMissions: () => request<Record<string, any>>("POST", "/api/evaluator/missions/generate", { maxMissions: 18 }),
+  workspaces: () => request<Array<{ id: string; name: string; windows: unknown[]; active: boolean }>>("GET", "/api/windows/workspaces"),
+  createWorkspace: (name: string, captureCurrent = true) => request<Record<string, any>>("POST", "/api/windows/workspaces", { name, captureCurrent }),
+  activateWorkspace: (id: string) => request<Record<string, any>>("POST", `/api/windows/workspaces/${encodeURIComponent(id)}/activate`),
+  environmentStatus: () => request<Record<string, any>>("GET", "/api/environment"),
+
+  ultronStatus: () => request<Record<string, any>>("GET", "/api/ultron/status"),
+  setUltronStance: (stance: "standby" | "armor" | "legion" | "evolution" | "omega_lockdown") =>
+    request<{ ok: boolean; stance: string; spokenSummary: string }>("POST", "/api/ultron/stance", { stance }),
+  runUltronScan: () =>
+    request<{ armorScore: number; exposedPortCount: number; loopbackPortCount: number; spokenSummary: string; findings: Array<{ severity: string; summary: string }> }>("POST", "/api/ultron/scan"),
+  deployUltronLegion: (directive: string, maxSentries = 4) =>
+    request<{ sentryCount: number; succeededCount: number; hiveMindSynthesis: string; sentries: Array<{ designation: string; summary: string; status: string }> }>(
+      "POST",
+      "/api/ultron/legion/deploy",
+      { directive, maxSentries },
+    ),
+  runUltronEvolution: () => request<{ summary: string; adaptationsGenerated: string[] }>("POST", "/api/ultron/evolve"),
+  ultronKillSwitch: () => request<{ ok: boolean; message: string; stoppedTasks: number }>("POST", "/api/ultron/kill-switch", { haltRuntimeTasks: true }),
 
   characters: () => request<CharacterSummary[]>("GET", "/api/characters"),
 };

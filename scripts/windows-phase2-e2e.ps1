@@ -17,10 +17,10 @@ function Run-WindowsVersion {
   $edition=if($computerInfo){[string]$computerInfo.WindowsProductName}else{$caption}
   $display=if($computerInfo){[string]$computerInfo.WindowsDisplayVersion}else{[string]$reg.DisplayVersion}
   $lab=if($computerInfo){[string]$computerInfo.WindowsBuildLabEx}else{''}
-  $ok=($caption -match 'Windows 11' -or $edition -match 'Windows 11' -or $build -ge 22000)
-  $discrepancy=if($reg.ProductName -notmatch 'Windows 11' -and $ok){'Registry ProductName differs from OS/CIM build identity.'}else{''}
-  $evidence="Caption=$caption; ComputerInfoProduct=$edition; ProductName=$($reg.ProductName); Build=$build; DisplayVersion=$display; BuildLab=$lab; Architecture=$($os.OSArchitecture)"
-  Add-Result 'Windows 11 identity' $(if($ok){'PASS'}else{'FAIL'}) $evidence $discrepancy
+  $ok=($caption -match 'Windows 10|Windows 11' -or $edition -match 'Windows 10|Windows 11' -or $build -ge 19041)
+  $tier=if($build -ge 22000){'Windows 11'}elseif($build -ge 19041){'Windows 10 Pro/20H1+'}else{'Unsupported'}
+  $evidence="Tier=$tier; Caption=$caption; ComputerInfoProduct=$edition; ProductName=$($reg.ProductName); Build=$build; DisplayVersion=$display; BuildLab=$lab; Architecture=$($os.OSArchitecture)"
+  Add-Result 'Windows 10 Pro / 11 identity' $(if($ok){'PASS'}else{'FAIL'}) $evidence ''
 }
 function Run-MonitorTopology {
   $hostExe=Join-Path $PSScriptRoot '..\sara-windows\native\DesktopHost\publish\Sara.DesktopHost.exe'

@@ -26,7 +26,27 @@ export type AppEventType =
   | "speech.say"
   | "debug.log"
   | "windows.changed"
-  | "windows.status";
+  | "windows.status"
+  | "jarvis.status"
+  | "jarvis.goal_planned"
+  | "jarvis.subtask_started"
+  | "jarvis.goal_completed"
+  | "jarvis.routine_executed"
+  | "jarvis.protocol_executed"
+  | "jarvis.simulation"
+  | "jarvis.blueprint"
+  | "optimization.completed"
+  | "evaluator.mission_started"
+  | "evaluator.mission_evaluated"
+  | "evaluator.agent2_diagnosed"
+  | "workspaces.updated"
+  | "workspaces.activated"
+  | "ultron.status"
+  | "ultron.scan_completed"
+  | "ultron.legion_deployed"
+  | "ultron.skill_forged"
+  | "ultron.integrity_alert"
+  | "ultron.kill_switch";
 
 export interface AppEvent<T = unknown> {
   type: AppEventType;

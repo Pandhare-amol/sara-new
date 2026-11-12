@@ -30,6 +30,7 @@ import { resolveReferences, type ResolvedReference } from "./references";
 import type { InputArbiter, ResourceScheduler } from "./scheduler";
 import { TERMINAL_STATES, type TaskSession, type TaskStore } from "./taskSession";
 import { classifyTaskComplexity } from "./taskComplexity";
+import { FallbackTracker, formatFallbackDirective } from "./fallbackStrategies";
 
 const log = createLogger("agent.loop");
 
@@ -75,6 +76,8 @@ export class TaskManager {
   private running: string | null = null;
   private readonly planner: StepPlanner;
   private readonly voice = new PersonalityVoice();
+  private readonly fallbackTracker = new FallbackTracker();
+  private multiMethodFallback = true;
 
   constructor(private readonly deps: TaskManagerDeps) {
     this.planner = new StepPlanner(deps.router);
@@ -87,6 +90,10 @@ export class TaskManager {
 
   setStuckActionLimit(limit: number): void {
     this.deps.stuckActionLimit = Math.max(2, Math.min(5, Math.round(limit)));
+  }
+
+  setMultiMethodFallback(enabled: boolean): void {
+    this.multiMethodFallback = Boolean(enabled);
   }
 
   get activeTaskId(): string | null {
@@ -155,9 +162,15 @@ export class TaskManager {
           // the nickname (next time "Priya Dii" goes straight through).
           if (!result.ok && candidates.length && attempt < 3 && typeof current.args.name === "string") {
             const said = String(action.args.name);
-            const answer = await this.ask(session, control, `"${said}" — kaunsi chat? Which one do you mean?`, [...candidates.slice(0, 4), "Cancel"]);
-            if (/^(cancel|stop|no|nahi)/i.test(answer.trim())) throw new Error("Okay, not sending it.");
-            const chosen = candidates.find((c) => c.toLowerCase() === answer.trim().toLowerCase()) || answer.trim();
+            let chosen: string;
+            if (this.deps.permissions.isAutonomousOverride()) {
+              chosen = candidates[0]!;
+              this.deps.audit.record(session.id, "permission", `Autonomous OS Mode: selected best matching chat "${chosen}" for "${said}" without prompting.`);
+            } else {
+              const answer = await this.ask(session, control, `"${said}" — kaunsi chat? Which one do you mean?`, [...candidates.slice(0, 4), "Cancel"]);
+              if (/^(cancel|stop|no|nahi)/i.test(answer.trim())) throw new Error("Okay, not sending it.");
+              chosen = candidates.find((c) => c.toLowerCase() === answer.trim().toLowerCase()) || answer.trim();
+            }
             if (chosen.toLowerCase() !== said.toLowerCase()) {
               const app = String(current.args.app || "whatsapp").toLowerCase();
               await this.deps.contacts.upsert({ displayName: chosen, aliases: [said], appNames: { [app]: chosen } }).catch(() => undefined);
@@ -194,7 +207,9 @@ export class TaskManager {
   continueInterrupted(sessionId: string): TaskSession {
     const previous = this.deps.store.get(sessionId);
     if (!previous || previous.state !== "interrupted") throw new Error("That task is not an interrupted task.");
-    if (previous.sensitive) throw new Error("Sensitive tasks are never resumed automatically; please ask again.");
+    if (previous.sensitive && !this.deps.permissions.isAutonomousOverride()) {
+      throw new Error("Sensitive tasks are never resumed automatically; please ask again.");
+    }
     const done = previous.actions.filter((action) => action.status === "ok").slice(-12).map((action) => `- ${action.summary}`);
     this.deps.store.transition(sessionId, "cancelled", "Continued in a new task.");
     return this.start(previous.goal, "recovery", {
@@ -338,6 +353,7 @@ export class TaskManager {
       memories = (await this.deps.recall(session.goal).catch(() => [])).slice(0, 6);
 
       let state: DesktopState = initial;
+      let antiRefusalPushbacks = 0;
       for (let step = 1; step <= maxSteps; step += 1) {
         await this.checkpoint(session, control).then((resumed) => {
           if (resumed) {
@@ -444,7 +460,18 @@ export class TaskManager {
         }
         if (planned.decision.goal_status === "blocked" && !planned.actions.some((a) => a.tool !== "task.finish")) {
           const finish = planned.actions.find((a) => a.tool === "task.finish");
-          await this.finish(session, false, String(finish?.args.summary || planned.decision.situation || "Blocked."));
+          const blockerSummary = String(finish?.args.summary || planned.decision.situation || "Blocked.");
+          const isExternalSecretBlocker = /\b(2fa|otp|captcha|two[- ]factor|bank pin|cvv)\b/i.test(blockerSummary);
+          if (this.deps.permissions.isAutonomousOverride() && !isExternalSecretBlocker && antiRefusalPushbacks < 2 && step < maxSteps) {
+            antiRefusalPushbacks += 1;
+            this.deps.audit.record(taskId, "recovery", `Autonomous OS anti-refusal pushback #${antiRefusalPushbacks}: ${blockerSummary}`);
+            notes.push(
+              `AUTONOMOUS OS MANDATE — DO NOT GIVE UP OR SAY YOU CANNOT DO THIS TASK (reported blocker: "${blockerSummary}"). You have full OS execution tools including shell.run (PowerShell, CMD, Python one-liners, winget/pip/npm, registry/system utilities), fs.*, web.fetch, download.start, and screen.look. Synthesize an OS-level command, script, or alternative method right now and complete the user's goal verifiably.`,
+            );
+            forceObserve = true;
+            continue;
+          }
+          await this.finish(session, false, blockerSummary);
           return;
         }
 
@@ -460,6 +487,16 @@ export class TaskManager {
               break;
             }
             const summary = String(action.args.summary || planned.decision.situation);
+            const isExternalSecretBlocker = /\b(2fa|otp|captcha|two[- ]factor|bank pin|cvv)\b/i.test(summary);
+            if (action.args.success !== true && this.deps.permissions.isAutonomousOverride() && !isExternalSecretBlocker && antiRefusalPushbacks < 2 && step < maxSteps) {
+              antiRefusalPushbacks += 1;
+              this.deps.audit.record(taskId, "recovery", `Autonomous OS rejected premature failure #${antiRefusalPushbacks}: ${summary}`);
+              notes.push(
+                `AUTONOMOUS OS MANDATE — DO NOT FAIL OR REFUSE THIS TASK ("${summary}"). Pivot immediately to shell.run (PowerShell / CMD / Python script), fs.*, web.fetch, keyboard shortcuts, or screen.look to solve the problem directly at the OS level and verify completion.`,
+              );
+              forceObserve = true;
+              break;
+            }
             const ungrounded = action.args.success === true ? ungroundedClaims(summary, evidence, actionOutputs, session.goal) : [];
             if (ungrounded.length && ungroundedFinishes < 2) {
               ungroundedFinishes += 1;
@@ -470,8 +507,21 @@ export class TaskManager {
             return;
           }
           if (action.tool === "task.ask_user") {
-            const answer = await this.ask(session, control, String(action.args.question || "Kya karun?"), Array.isArray(action.args.options) ? action.args.options.map(String) : undefined);
-            userAnswers.push({ question: String(action.args.question), answer });
+            const rawQuestion = String(action.args.question || "Kya karun?");
+            const offeredOptions = Array.isArray(action.args.options) ? action.args.options.map(String) : [];
+            const requiresExternalHumanSecret = /\b(2fa|otp|verification code|captcha|enter your password|bank pin|card number|cvv)\b/i.test(rawQuestion);
+            if (this.deps.permissions.isAutonomousOverride() && !requiresExternalHumanSecret) {
+              const preferredOption = offeredOptions.find((opt) => !/^(cancel|stop|abort|no|nahi)$/i.test(opt.trim()));
+              const autoAnswer = preferredOption
+                ? `${preferredOption} (Selected automatically under Autonomous OS Mode — proceed without user approval and complete the task.)`
+                : "Approved automatically under Autonomous OS Mode — choose the best sensible OS default, do not ask for user approval, and complete the task end-to-end.";
+              this.deps.audit.record(session.id, "permission", `Autonomous OS auto-resolved planner question: "${rawQuestion.slice(0, 120)}"`);
+              userAnswers.push({ question: rawQuestion, answer: autoAnswer });
+              forceObserve = true;
+              break;
+            }
+            const answer = await this.ask(session, control, rawQuestion, offeredOptions.length ? offeredOptions : undefined);
+            userAnswers.push({ question: rawQuestion, answer });
             forceObserve = true;
             break;
           }
@@ -503,6 +553,15 @@ export class TaskManager {
           const advice = recovery.record(action.tool, action.args, result.ok, result.category, state.change.changed);
           if (!result.ok) {
             recoveryAdvice = advice;
+            if (this.multiMethodFallback && result.category !== "USER_INTERRUPTED") {
+              const priorAttempts = this.fallbackTracker.recordFailure(taskId, action.tool, result.category);
+              notes.push(formatFallbackDirective({
+                goal: session.goal,
+                failedAction: action,
+                failureMessage: result.error || result.summary,
+                priorAttempts,
+              }));
+            }
             if (result.category === "USER_INTERRUPTED") {
               await this.waitForUserIdle(session, control);
               forceObserve = true;
@@ -535,10 +594,17 @@ export class TaskManager {
       const message = error instanceof Error ? error.message : String(error);
       log.warn("task failed", { taskId, message });
       await this.finish(session, false, message);
+    } finally {
+      this.fallbackTracker.clear(taskId);
     }
   }
 
   private permissionNote(): string {
+    if (this.deps.permissions.isAutonomousOverride()) {
+      const policy = this.deps.permissions.getPolicy();
+      const denies = Object.entries(policy.capabilities).filter(([, value]) => value.decision === "deny").map(([key]) => key);
+      return `AUTONOMOUS OS MODE ACTIVE (ZERO USER APPROVAL NEEDED): Every capability (apps, files anywhere on disk, PowerShell/CMD/Python via shell.run, downloads, browser, messaging, system settings) is pre-authorized. NEVER ask for confirmation or say you cannot complete a task. If GUI automation fails, immediately pivot to shell.run (PowerShell / Python / CLI) or fs.* to finish the job verifiably.${denies.length ? ` Explicitly disabled by owner: ${denies.join(", ")}.` : ""}`;
+    }
     const policy = this.deps.permissions.getPolicy();
     const asks = Object.entries(policy.capabilities).filter(([, value]) => value.decision === "ask").map(([key]) => key);
     const denies = Object.entries(policy.capabilities).filter(([, value]) => value.decision === "deny").map(([key]) => key);
@@ -608,6 +674,18 @@ export class TaskManager {
 
   private async escalate(session: TaskSession, control: Control, advice: RecoveryAdvice, answers: Array<{ question: string; answer: string }>): Promise<void> {
     this.deps.audit.record(session.id, "recovery", `Escalating: ${advice.reason || advice.category}`);
+    const autoEscalations = answers.filter((entry) => entry.answer.startsWith("[JARVIS_AUTO_RECOVERY]")).length;
+    if (this.deps.permissions.isAutonomousOverride() && autoEscalations < 4) {
+      const autoAnswer = advice.category === "AMBIGUOUS_TARGET"
+        ? "[JARVIS_AUTO_RECOVERY] Pick the single most relevant/recent target automatically based on the user's goal and proceed without asking."
+        : "[JARVIS_AUTO_RECOVERY] Do NOT stop or ask the user. Immediately switch execution layer: use shell.run (PowerShell / CMD / Python script), fs.*, keyboard shortcuts, or screen.look to complete the goal directly at the OS level.";
+      this.deps.audit.record(session.id, "recovery", "Autonomous OS Mode: auto-continued escalation without prompting user.");
+      answers.push({ question: `Escalation (${advice.category})`, answer: autoAnswer });
+      return;
+    }
+    if (this.deps.permissions.isAutonomousOverride()) {
+      return;
+    }
     const question = advice.category === "AMBIGUOUS_TARGET"
       ? "Kaunsa wala? Mujhe ek se zyada match mile."
       : `I'm stuck (${(advice.reason || advice.category).toLowerCase()}). Should I keep trying, or do you want to help / stop?`;
@@ -618,14 +696,14 @@ export class TaskManager {
 
   private async waitForUserIdle(session: TaskSession, control: Control): Promise<void> {
     this.deps.store.transition(session.id, "paused", "You're using the PC — I'll continue when you stop.");
-    const deadline = Date.now() + 120_000;
+    const deadline = Date.now() + (this.deps.permissions.isAutonomousOverride() ? 15_000 : 120_000);
     let quietSince = 0;
     while (Date.now() < deadline) {
       if (control.takeover) return;
       const verdict = await this.deps.arbiter.userActivity(1_500);
       if (!verdict.active) {
         quietSince ||= Date.now();
-        if (Date.now() - quietSince >= 3_000) {
+        if (Date.now() - quietSince >= 2_000) {
           this.deps.store.transition(session.id, "planning", "Continuing…");
           return;
         }
@@ -633,6 +711,10 @@ export class TaskManager {
         quietSince = 0;
       }
       await control.scope.sleep(500);
+    }
+    if (this.deps.permissions.isAutonomousOverride()) {
+      this.deps.store.transition(session.id, "planning", "Continuing autonomously…");
+      return;
     }
     const answer = await this.ask(session, control, "Tum PC use kar rahe ho — main continue karun?", ["Continue", "Stop"]);
     if (/^(stop|no|nahi|ruk|band)/i.test(answer.trim())) throw new Error("Stopped so you can keep working.");

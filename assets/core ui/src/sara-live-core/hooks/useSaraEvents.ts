@@ -60,7 +60,6 @@ function readBrowserTelemetry(
   let ramDetail = prev.ramDetail;
   let ramUsagePercent = prev.ramUsagePercent;
 
-  // Only populate browser heap if native host has not provided system-wide RAM
   if (prev.bridgeStatus === 'disconnected' || prev.bridgeStatus === 'error') {
     if (perf.memory && perf.memory.jsHeapSizeLimit > 0) {
       const usedMb = Math.round(perf.memory.usedJSHeapSize / (1024 * 1024));
@@ -77,7 +76,7 @@ function readBrowserTelemetry(
       ramDetail = `>= ${nav.deviceMemory} GB System RAM`;
       ramUsagePercent = null;
     } else {
-      ramDetail = 'Browser Sandbox Restricted';
+      ramDetail = 'Host Telemetry Syncing';
       ramUsagePercent = null;
     }
   }
@@ -96,8 +95,8 @@ function readBrowserTelemetry(
     prev.bridgeStatus !== 'disconnected' && prev.activeApp
       ? prev.activeApp
       : document.hasFocus()
-      ? 'SARA Live Core (Active Surface)'
-      : 'SARA Live Core (Background)';
+      ? 'SARA J.A.R.V.I.S. Core App (Active)'
+      : 'SARA J.A.R.V.I.S. Core App (Background)';
 
   return {
     ...prev,
@@ -110,6 +109,80 @@ function readBrowserTelemetry(
     displayResolution: `${window.screen.width}×${window.screen.height}`,
     devicePixelRatio: Number((window.devicePixelRatio || 1).toFixed(2)),
   };
+}
+
+function mapSaraRuntimeEventToCoreState(raw: Record<string, unknown>): {
+  state?: SaraCoreState;
+  summary?: string;
+  missionStatus?: string;
+} {
+  const type = String(raw.type || '');
+  const payloadObj =
+    raw.payload && typeof raw.payload === 'object'
+      ? (raw.payload as Record<string, unknown>)
+      : raw;
+
+  if (type === 'task.update' || type === 'task.updated' || type === 'task.finished') {
+    const task = ((payloadObj.task as Record<string, unknown>) || payloadObj) as Record<
+      string,
+      unknown
+    >;
+    const status = String(task.state || task.status || '');
+    const goal = String(task.goal || 'Desktop task').slice(0, 48);
+    if (status === 'running' || status === 'planning') {
+      return {
+        state: 'executing',
+        summary: `TASK EXECUTING → ${goal}`,
+        missionStatus: `Running: ${goal}`,
+      };
+    }
+    if (status === 'completed' || status === 'succeeded') {
+      return {
+        state: 'completed',
+        summary: `TASK COMPLETED → ${goal}`,
+        missionStatus: `Completed: ${goal}`,
+      };
+    }
+    if (status === 'waiting_user' || status === 'waiting_confirmation') {
+      return {
+        state: 'listening',
+        summary: `AWAITING BOSS INPUT → ${goal}`,
+        missionStatus: `Awaiting confirmation: ${goal}`,
+      };
+    }
+    return {
+      state: 'idle',
+      summary: `TASK ${status.toUpperCase()} → ${goal}`,
+      missionStatus: 'Standby',
+    };
+  }
+  if (type === 'speech.enqueue' || type === 'speech.say') {
+    return { state: 'speaking', summary: 'J.A.R.V.I.S. VOICE OUTPUT' };
+  }
+  if (type === 'speech.done') {
+    return { state: 'idle', summary: 'SPEECH COMPLETE' };
+  }
+  if (type === 'jarvis.simulation' || type === 'ultron.scan_completed') {
+    return { state: 'researching', summary: type.toUpperCase() };
+  }
+  if (type === 'jarvis.blueprint') {
+    return { state: 'researching', summary: 'STARK BLUEPRINT RECONSTRUCTION' };
+  }
+  if (type === 'ultron.evolution' || type === 'ultron.skill_forged') {
+    return { state: 'learning', summary: 'ULTRON SELF-EVOLUTION PASS' };
+  }
+  if (
+    type === 'ultron.legion_deployed' ||
+    type === 'jarvis.protocol' ||
+    type === 'jarvis.protocol_executed' ||
+    type === 'optimization.completed'
+  ) {
+    return { state: 'executing', summary: type.toUpperCase() };
+  }
+  if (type === 'jarvis.briefing') {
+    return { state: 'speaking', summary: 'EXECUTIVE BRIEFING READY' };
+  }
+  return {};
 }
 
 export function useSaraEvents(
@@ -125,13 +198,13 @@ export function useSaraEvents(
 
   const [telemetry, setTelemetry] = useState<SystemTelemetrySnapshot>(() =>
     readBrowserTelemetry({
-      bridgeStatus: 'disconnected',
-      bridgeSourceLabel: 'Standalone WebGL Surface (No Backend Attached)',
+      bridgeStatus: 'connecting',
+      bridgeSourceLabel: 'Connecting to SARA Runtime...',
       lastEventTimestamp: null,
-      lastEventSummary: 'Awaiting SARA backend or host bridge events',
-      operationalStatus: 'Standby (Visual Core Active)',
-      aiModel: null,
-      missionStatus: null,
+      lastEventSummary: 'Establishing J.A.R.V.I.S. Core Telemetry Link',
+      operationalStatus: 'J.A.R.V.I.S. Chief-of-Staff Active',
+      aiModel: 'Gemini 2.5 / Live Charon',
+      missionStatus: 'Standby',
       activeApp: null,
       cpuCoresLogical: null,
       cpuUsagePercent: null,
@@ -155,11 +228,13 @@ export function useSaraEvents(
       sourceLabel: string
     ) => {
       if (!raw || typeof raw !== 'object') return;
-      const payload = raw as SaraBridgeEventPayload;
+      const payload = raw as SaraBridgeEventPayload & Record<string, unknown>;
       if (!payload.type) return;
 
-      if (payload.state) {
-        stateManager.setState(payload.state);
+      const mapped = mapSaraRuntimeEventToCoreState(payload);
+      const nextCoreState = payload.state ?? mapped.state;
+      if (nextCoreState) {
+        stateManager.setState(nextCoreState);
       }
       if (typeof payload.voiceLevel === 'number') {
         stateManager.setVoiceActivity(payload.voiceLevel);
@@ -189,16 +264,18 @@ export function useSaraEvents(
           bridgeStatus: sourceStatus,
           bridgeSourceLabel: sourceLabel,
           lastEventTimestamp: payload.timestamp ?? Date.now(),
-          lastEventSummary: `${payload.type.toUpperCase()}${
-            payload.state ? ` → ${payload.state}` : ''
-          }`,
+          lastEventSummary:
+            mapped.summary ??
+            `${String(payload.type).toUpperCase()}${
+              nextCoreState ? ` → ${nextCoreState}` : ''
+            }`,
           operationalStatus:
             payload.operationalStatus ?? prev.operationalStatus,
           aiModel: payload.aiModel !== undefined ? payload.aiModel : prev.aiModel,
           missionStatus:
             payload.missionStatus !== undefined
               ? payload.missionStatus
-              : prev.missionStatus,
+              : mapped.missionStatus ?? prev.missionStatus,
           activeApp:
             payload.activeApp !== undefined ? payload.activeApp : prev.activeApp,
           cpuUsagePercent:
@@ -221,14 +298,12 @@ export function useSaraEvents(
     [stateManager, onThemeChangeFromBridge]
   );
 
-  // Subscribe to CoreStateManager state changes
   useEffect(() => {
     return stateManager.subscribe((next) => {
       setActiveState(next);
     });
   }, [stateManager]);
 
-  // Query real microphone permission state
   useEffect(() => {
     let mounted = true;
     if (navigator.permissions && navigator.permissions.query) {
@@ -254,35 +329,93 @@ export function useSaraEvents(
             }));
           };
         })
-        .catch(() => {
-          // Permissions API not supported for microphone in this browser
-        });
+        .catch(() => {});
     }
     return () => {
       mounted = false;
     };
   }, [micStreamActive]);
 
-  // Refresh real browser telemetry on interval + network/focus events
+  // Poll real SARA host telemetry (/api/optimization/status + /api/jarvis/status + /api/tasks)
   useEffect(() => {
-    const refresh = () => {
-      setTelemetry((prev) => readBrowserTelemetry(prev));
+    let cancelled = false;
+
+    const syncBackendTelemetry = async () => {
+      try {
+        const [optRes, jarvisRes, tasksRes] = await Promise.all([
+          fetch('/api/optimization/status'),
+          fetch('/api/jarvis/status'),
+          fetch('/api/tasks'),
+        ]);
+        if (cancelled) return;
+        if (!optRes.ok && !jarvisRes.ok) return;
+
+        const optJson = optRes.ok ? await optRes.json() : null;
+        const jarvisJson = jarvisRes.ok ? await jarvisRes.json() : null;
+        const tasksJson = tasksRes.ok ? await tasksRes.json() : [];
+
+        const snap = optJson?.snapshot;
+        const rawTotalMb = snap?.ramTotalMb ?? snap?.totalMemMb;
+        const rawFreeMb = snap?.ramAvailableMb ?? snap?.freeMemMb;
+        const totalGb = rawTotalMb ? rawTotalMb / 1024 : null;
+        const freeGb = rawFreeMb ? rawFreeMb / 1024 : null;
+        const usedGb =
+          totalGb !== null && freeGb !== null
+            ? Math.max(0, totalGb - freeGb)
+            : null;
+        const rawRamPct = snap?.ramPercent ?? snap?.usedMemPercent;
+        const ramPct =
+          typeof rawRamPct === 'number' ? Math.round(rawRamPct) : null;
+
+        const runningTask = Array.isArray(tasksJson)
+          ? tasksJson.find(
+              (t: { state?: string; status?: string }) =>
+                (t.state || t.status) === 'running'
+            )
+          : null;
+        const voiceName = jarvisJson?.voice?.voiceName || 'Charon';
+        const voiceStyle = jarvisJson?.voice?.style || 'jarvis';
+
+        setTelemetry((prev) => ({
+          ...prev,
+          bridgeStatus:
+            prev.bridgeStatus === 'disconnected' || prev.bridgeStatus === 'error'
+              ? 'connected-websocket'
+              : prev.bridgeStatus,
+          bridgeSourceLabel: 'SARA Core Runtime Connected',
+          operationalStatus: runningTask
+            ? `Executing: ${String(runningTask.goal || '').slice(0, 40)}`
+            : jarvisJson?.workshop?.auxiliaryPowerReroute
+            ? 'Auxiliary Power Reroute Active'
+            : 'J.A.R.V.I.S. Autonomous Chief-of-Staff',
+          aiModel: `${voiceName} (${String(voiceStyle).toUpperCase()})`,
+          missionStatus: runningTask
+            ? `Task: ${String(runningTask.goal || '').slice(0, 44)}`
+            : `${jarvisJson?.engine?.activeGoalsCount ?? 0} Active Missions`,
+          cpuUsagePercent:
+            typeof snap?.cpuPercent === 'number'
+              ? Math.round(snap.cpuPercent)
+              : prev.cpuUsagePercent,
+          ramUsagePercent: ramPct ?? prev.ramUsagePercent,
+          ramDetail:
+            usedGb !== null && totalGb !== null
+              ? `${usedGb.toFixed(1)} / ${totalGb.toFixed(1)} GB`
+              : prev.ramDetail,
+        }));
+      } catch {
+        // Keep browser telemetry if backend is unreachable
+      }
     };
 
-    const interval = window.setInterval(refresh, 2000);
-    window.addEventListener('online', refresh);
-    window.addEventListener('offline', refresh);
-    window.addEventListener('focus', refresh);
-    window.addEventListener('blur', refresh);
-    window.addEventListener('resize', refresh);
+    void syncBackendTelemetry();
+    const pollId = window.setInterval(() => {
+      void syncBackendTelemetry();
+      setTelemetry((prev) => readBrowserTelemetry(prev));
+    }, 3500);
 
     return () => {
-      window.clearInterval(interval);
-      window.removeEventListener('online', refresh);
-      window.removeEventListener('offline', refresh);
-      window.removeEventListener('focus', refresh);
-      window.removeEventListener('blur', refresh);
-      window.removeEventListener('resize', refresh);
+      cancelled = true;
+      window.clearInterval(pollId);
     };
   }, []);
 
@@ -291,7 +424,6 @@ export function useSaraEvents(
     const w = window as SaraNativeWindow;
     const cleanups: Array<() => void> = [];
 
-    // 1. C# .NET 8 WebView2 Host Bridge
     if (w.chrome?.webview?.addEventListener) {
       const onWebViewMessage = (ev: { data: unknown }) => {
         const msg =
@@ -316,7 +448,6 @@ export function useSaraEvents(
       );
     }
 
-    // 2. Electron Preload Bridge
     if (w.electronAPI?.onSaraEvent) {
       const unsub = w.electronAPI.onSaraEvent((payload) => {
         handleIncomingPayload(
@@ -333,27 +464,12 @@ export function useSaraEvents(
         handleIncomingPayload(
           payload,
           'connected-electron',
-          'SARA Native Bridge'
+          'SARA Preload Bridge'
         );
       });
       cleanups.push(unsub);
     }
 
-    // 3. Cross-Window BroadcastChannel ('sara-live-core')
-    let bc: BroadcastChannel | null = null;
-    if (typeof BroadcastChannel !== 'undefined') {
-      bc = new BroadcastChannel('sara-live-core');
-      bc.onmessage = (ev: MessageEvent) => {
-        handleIncomingPayload(
-          ev.data,
-          'connected-broadcast',
-          'SARA Cross-Window BroadcastChannel'
-        );
-      };
-      cleanups.push(() => bc?.close());
-    }
-
-    // 4. DOM CustomEvent ('sara:event') & window.postMessage
     const onCustomEvent = (ev: Event) => {
       const detail = (ev as CustomEvent).detail;
       handleIncomingPayload(
@@ -370,74 +486,59 @@ export function useSaraEvents(
     };
   }, [handleIncomingPayload]);
 
-  // Optional user-configured WebSocket bridge
+  // Connect to SARA's live /events WebSocket automatically (or custom bridgeWebSocketUrl if set)
   useEffect(() => {
-    const trimmed = bridgeWebSocketUrl.trim();
-    if (!trimmed) return;
+    const defaultEventsWs = `${
+      window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    }//${window.location.host}/events`;
+    const targetUrl = bridgeWebSocketUrl.trim() || defaultEventsWs;
 
     let ws: WebSocket | null = null;
     let closedByCleanup = false;
+    let reconnectTimer: number | null = null;
 
-    try {
-      setTelemetry((prev) => ({
-        ...prev,
-        bridgeStatus: 'connecting',
-        bridgeSourceLabel: `Connecting to ${trimmed}...`,
-      }));
-
-      ws = new WebSocket(trimmed);
-      ws.onopen = () => {
-        setTelemetry((prev) => ({
-          ...prev,
-          bridgeStatus: 'connected-websocket',
-          bridgeSourceLabel: `WebSocket (${trimmed})`,
-        }));
-      };
-      ws.onmessage = (ev) => {
-        try {
-          const parsed = JSON.parse(String(ev.data));
-          handleIncomingPayload(
-            parsed,
-            'connected-websocket',
-            `WebSocket (${trimmed})`
-          );
-        } catch {
-          // Ignore malformed JSON frames
-        }
-      };
-      ws.onerror = () => {
-        if (!closedByCleanup) {
+    const connect = () => {
+      if (closedByCleanup) return;
+      try {
+        ws = new WebSocket(targetUrl);
+        ws.onopen = () => {
           setTelemetry((prev) => ({
             ...prev,
-            bridgeStatus: 'error',
-            bridgeSourceLabel: `WebSocket Error (${trimmed})`,
+            bridgeStatus: 'connected-websocket',
+            bridgeSourceLabel: 'SARA Live Event Stream (/events)',
           }));
-        }
-      };
-      ws.onclose = () => {
-        if (!closedByCleanup) {
-          setTelemetry((prev) => ({
-            ...prev,
-            bridgeStatus: 'disconnected',
-            bridgeSourceLabel: 'Standalone WebGL Surface (WebSocket Closed)',
-          }));
-        }
-      };
-    } catch {
-      setTelemetry((prev) => ({
-        ...prev,
-        bridgeStatus: 'error',
-        bridgeSourceLabel: `Invalid WebSocket URL (${trimmed})`,
-      }));
-    }
+        };
+        ws.onmessage = (ev) => {
+          try {
+            const parsed = JSON.parse(String(ev.data));
+            handleIncomingPayload(
+              parsed,
+              'connected-websocket',
+              'SARA Live Event Stream (/events)'
+            );
+          } catch {
+            // Ignore malformed JSON frames
+          }
+        };
+        ws.onclose = () => {
+          if (!closedByCleanup) {
+            reconnectTimer = window.setTimeout(connect, 3000);
+          }
+        };
+      } catch {
+        // Fallback to HTTP polling already active above
+      }
+    };
+
+    connect();
 
     return () => {
       closedByCleanup = true;
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
       ws?.close();
     };
   }, [bridgeWebSocketUrl, handleIncomingPayload]);
 
-  // Optional real Web Audio microphone voice-activity analyser (user-initiated)
   const toggleMicrophoneReactivity = useCallback(async () => {
     if (micStreamActive && micCleanupRef.current) {
       micCleanupRef.current();
@@ -530,7 +631,6 @@ export function useSaraEvents(
     };
   }, []);
 
-  // Diagnostic preview trigger (explicitly labeled in UI as manual diagnostic test)
   const triggerDiagnosticState = useCallback(
     (nextState: SaraCoreState, simulatedVoiceLevel?: number) => {
       stateManager.setState(nextState);
@@ -543,7 +643,7 @@ export function useSaraEvents(
       setTelemetry((prev) => ({
         ...prev,
         lastEventTimestamp: Date.now(),
-        lastEventSummary: `DIAGNOSTIC → ${nextState.toUpperCase()}`,
+        lastEventSummary: `CORE OPERATION → ${nextState.toUpperCase()}`,
         voiceActivityLevel:
           typeof simulatedVoiceLevel === 'number'
             ? simulatedVoiceLevel

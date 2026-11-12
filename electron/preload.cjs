@@ -44,8 +44,16 @@ const saraBridge = {
   getDesktopHostStatus: () => ipcRenderer.invoke('desktop-host:get-status'),
   /** Open the separately hosted Live Core surface through the trusted main process. */
   openLiveCore: () => ipcRenderer.invoke('live-core:open'),
+  openLiveCoreWindow: () => ipcRenderer.invoke('live-core:open'),
+  focusMainShell: () => ipcRenderer.invoke('live-core:focus-main'),
   getLiveCoreSurfaceStatus: () => ipcRenderer.invoke('live-core:surface-status'),
   setLiveCoreSurface: (enabled) => ipcRenderer.invoke('live-core:surface-set', Boolean(enabled)),
+  /** Native Windows application window chrome controls (mainWindow & liveCoreWindow). */
+  windowMinimize: () => ipcRenderer.invoke('window:minimize'),
+  windowMaximizeToggle: () => ipcRenderer.invoke('window:maximize-toggle'),
+  windowClose: () => ipcRenderer.invoke('window:close'),
+  windowAlwaysOnTop: (enabled) => ipcRenderer.invoke('window:always-on-top', typeof enabled === 'boolean' ? enabled : undefined),
+  windowGetState: () => ipcRenderer.invoke('window:get-state'),
   onLiveCoreSurfaceStatus: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('live-core:surface-status', listener);

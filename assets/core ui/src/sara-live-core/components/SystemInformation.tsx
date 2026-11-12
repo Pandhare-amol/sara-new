@@ -26,6 +26,7 @@ interface SystemInformationProps {
   telemetry: SystemTelemetrySnapshot;
   activeState: SaraCoreState;
   clickThroughDesktopMode: boolean;
+  deckExpanded?: boolean;
 }
 
 export const SystemInformation: React.FC<SystemInformationProps> = ({
@@ -34,6 +35,7 @@ export const SystemInformation: React.FC<SystemInformationProps> = ({
   telemetry,
   activeState,
   clickThroughDesktopMode,
+  deckExpanded = false,
 }) => {
   const [now, setNow] = useState(() => new Date());
 
@@ -66,7 +68,11 @@ export const SystemInformation: React.FC<SystemInformationProps> = ({
     telemetry.bridgeStatus !== 'error';
 
   return (
-    <div className="pointer-events-none fixed inset-0 z-10 flex flex-col justify-between p-5 sm:p-7">
+    <div
+      className={`pointer-events-none fixed inset-0 z-10 flex flex-col justify-between px-5 pt-12 pb-5 transition-all sm:px-7 sm:pb-7 ${
+        deckExpanded ? 'lg:pl-[424px]' : ''
+      }`}
+    >
       {/* TOP PERIMETER BAR */}
       <div className="flex flex-wrap items-start justify-between gap-4">
         {/* Top-Left: SARA Operational Status & Bridge State */}

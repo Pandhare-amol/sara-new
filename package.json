@@ -30,7 +30,7 @@
     "test:windows-bridge": "npm run kill:native-locks && dotnet run --project sara-windows/native/WindowsBridge.Tests/WindowsBridge.Tests.csproj --configuration Release && npm run build:windows-bridge && node --import tsx --test tests/windowsBridge.integration.test.ts",
     "build:desktop-host": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/clear-native-build-locks.ps1 -Target DesktopHost && dotnet publish sara-windows/native/DesktopHost/Sara.DesktopHost.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true --output sara-windows/native/DesktopHost/publish",
     "build:live-core-host": "dotnet publish \"assets/core ui/desktop-host/dotnet/SaraLiveCoreHost/SaraLiveCoreHost.csproj\" --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true --output \"assets/core ui/desktop-host/dotnet/SaraLiveCoreHost/publish\"",
-    "test:desktop-host": "npm run build:desktop-host && node -e \"const {spawnSync}=require('node:child_process');const path=require('node:path');const r=spawnSync(path.resolve('sara-windows/native/DesktopHost/publish/Sara.DesktopHost.exe'),['--self-test'],{encoding:'utf8'});if(r.error)throw r.error;if(r.stdout)process.stdout.write(r.stdout);if(r.stderr)process.stderr.write(r.stderr);const d=JSON.parse(r.stdout);if(r.status!==0||!d.ok||d.dpiMode!=='PerMonitorV2'||Number(d.windowsBuild)<22000||d.monitorCount<1||d.explorerRunning!==true||d.wallpaperHost!==false)process.exit(1)\"",
+    "test:desktop-host": "npm run build:desktop-host && node -e \"const {spawnSync}=require('node:child_process');const path=require('node:path');const r=spawnSync(path.resolve('sara-windows/native/DesktopHost/publish/Sara.DesktopHost.exe'),['--self-test'],{encoding:'utf8'});if(r.error)throw r.error;if(r.stdout)process.stdout.write(r.stdout);if(r.stderr)process.stderr.write(r.stderr);const d=JSON.parse(r.stdout);if(r.status!==0||!d.ok||d.dpiMode!=='PerMonitorV2'||Number(d.windowsBuild)<19041||d.monitorCount<1||d.explorerRunning!==true||d.wallpaperHost!==false)process.exit(1)\"",
     "test:desktop-host:webview": "node --import tsx --test tests/desktopHost.webview.integration.test.ts",
     "build:launcher": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-launcher.ps1",
     "shell:diagnose": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sara-shell-recovery.ps1 -Action diagnose",
@@ -55,7 +55,11 @@
     "test:app-settings": "node --import tsx --test tests/appSettings.test.ts",
     "test:companion-layer": "node --import tsx --test tests/companionLayerPolicy.test.ts",
     "test:agent": "node --import tsx --test tests/core.test.ts tests/models.test.ts tests/agentLoop.test.ts tests/presence.test.ts tests/chatOpen.test.ts",
-    "test": "npm run lint && npm run test:agent && npm run test:characters && npm run test:app-settings && npm run test:companion-layer && npm run test:cognition && npm run test:screen-vision && npm run test:api-hub && npm run test:python",
+    "test:jarvis": "node --import tsx --test tests/jarvisCapabilities.test.ts",
+    "sandbox": "tsx scripts/run-sandbox-env.ts --serve",
+    "sandbox:verify": "tsx scripts/run-sandbox-env.ts --verify",
+    "win10:integrate": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/integrate-windows10-pro.ps1",
+    "test": "npm run lint && npm run test:agent && npm run test:jarvis && npm run test:characters && npm run test:app-settings && npm run test:companion-layer && npm run test:cognition && npm run test:screen-vision && npm run test:api-hub && npm run test:python",
     "import:character": "tsx tools/import-character.ts"
   },
   "dependencies": {

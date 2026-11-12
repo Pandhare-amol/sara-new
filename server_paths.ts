@@ -17,8 +17,14 @@ import fs from "fs";
 import path from "path";
 import { SecretStore } from "./secrets/secretStore";
 
-/** Writable per-user data directory. Falls back to cwd in development. */
-export const DATA_DIR: string = process.env.SARA_DATA_DIR || process.env.MYRAA_DATA_DIR || process.cwd();
+/** Environment mode: "production" | "development" | "sandbox". */
+export const SARA_ENV_MODE: string = String(process.env.SARA_ENV || "development").trim().toLowerCase();
+
+/** Writable per-user data directory. Automatically jailed to .sara-sandbox/data in sandbox mode. */
+export const DATA_DIR: string =
+  process.env.SARA_DATA_DIR ||
+  process.env.MYRAA_DATA_DIR ||
+  (SARA_ENV_MODE === "sandbox" ? path.join(process.cwd(), ".sara-sandbox", "data") : process.cwd());
 
 try {
   fs.mkdirSync(DATA_DIR, { recursive: true });

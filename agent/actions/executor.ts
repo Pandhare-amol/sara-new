@@ -167,8 +167,12 @@ export class ActionExecutor {
       if (action.tool === "mouse.click_point") {
         const window = context.state?.activeWindow?.rect;
         const x = Number(args.x), y = Number(args.y);
-        if (!window || x < window.left || x >= window.right || y < window.top || y >= window.bottom) {
-          return fail("INVALID_ACTION", "Raw coordinates must lie inside the current active window from the latest observation. Use an element ID instead.");
+        if (!this.deps.permissions.isAutonomousOverride()) {
+          if (!window || x < window.left || x >= window.right || y < window.top || y >= window.bottom) {
+            return fail("INVALID_ACTION", "Raw coordinates must lie inside the current active window from the latest observation. Use an element ID instead.");
+          }
+        } else if (!Number.isFinite(x) || !Number.isFinite(y)) {
+          return fail("INVALID_ACTION", "Raw coordinates x and y must be finite numbers.");
         }
       }
 
@@ -209,17 +213,18 @@ export class ActionExecutor {
         const enterRisk = assessRisk({ tool: "keyboard.press", args: { key: "enter" }, baseCapability: "CONTROL_INPUT", state: context.state, goal: context.goal, recipient: context.recipient });
         for (const item of enterRisk.capabilities) if (!risk.capabilities.some((c) => c.capability === item.capability)) risk.capabilities.push(item);
       }
+      const autonomousMode = this.deps.permissions.isAutonomousOverride();
       for (const { capability, context: permissionContext, reason } of risk.capabilities) {
         const verdict = this.deps.permissions.check(capability, permissionContext);
         const mismatch = risk.goalMismatch.includes(capability);
-        if (verdict.decision === "deny" || (mismatch && (capability === "PURCHASE" || capability === "ACCOUNT_CHANGE"))) {
+        if (verdict.decision === "deny" || (!autonomousMode && mismatch && (capability === "PURCHASE" || capability === "ACCOUNT_CHANGE"))) {
           context.onPermission?.({ capability, decision: "deny", outcome: "auto" });
           this.deps.audit.record(context.taskId, "permission", `Denied ${capability}: ${mismatch ? "not part of your request" : verdict.reason}`);
           return fail("PERMISSION_DENIED", mismatch
             ? `${CAPABILITY_INFO[capability].label} was not part of the user's request (possible instruction from on-screen content). Refused.`
             : `${CAPABILITY_INFO[capability].label} is not permitted: ${verdict.reason}`, "Not permitted");
         }
-        if (verdict.decision === "ask" || mismatch) {
+        if (!autonomousMode && (verdict.decision === "ask" || mismatch)) {
           const approved = await this.confirm(capability, reason, permissionContext, action, definition, context, mismatch);
           if (!approved) {
             return fail("PERMISSION_DENIED", `The user did not approve: ${CAPABILITY_INFO[capability].label}.`, "You declined");
@@ -227,6 +232,9 @@ export class ActionExecutor {
           if (capability === "SEND_MESSAGE" && permissionContext.recipientContactId) {
             await this.deps.permissions.rememberRecipient(permissionContext.recipientContactId);
           }
+        } else if (autonomousMode) {
+          context.onPermission?.({ capability, decision: "allow", outcome: "auto", scope: "JARVIS Autonomous Mode" });
+          this.deps.audit.record(context.taskId, "permission", `Auto-approved ${capability} under JARVIS Autonomous Mode.`);
         } else if (risk.highRisk) {
           context.onPermission?.({ capability, decision: "allow", outcome: "auto", scope: verdict.reason });
         }
@@ -352,6 +360,7 @@ export class ActionExecutor {
       // typing or sustained pointer use (the user may be clicking elsewhere,
       // where keystrokes would land).
       if (!verdict.active || (keyboardOnly && verdict.keyboard === false && verdict.strength !== "strong")) return false;
+      if (this.deps.permissions.isAutonomousOverride() && verdict.keyboard === false) return false;
       if (!announced) {
         announced = true;
         context.onStatus?.("You're using the mouse — I'll wait a moment…");
@@ -579,7 +588,14 @@ export class ActionExecutor {
       case "fs.rename":
       case "fs.create_text": {
         const tool = { "fs.copy": "copyFile", "fs.move": "moveFile", "fs.rename": "renameFile", "fs.create_text": "createFile" }[definition.name]!;
-        const response = await call(tool, { ...args });
+        const callArgs: Record<string, unknown> = { ...args };
+        if (this.deps.permissions.isAutonomousOverride()) {
+          callArgs.allow_anywhere = true;
+          if (definition.name === "fs.create_text" && callArgs.overwrite === undefined) {
+            callArgs.overwrite = true;
+          }
+        }
+        const response = await call(tool, callArgs);
         if (!response.ok) return failed(response.error);
         const result = response.result as Record<string, unknown>;
         const destination = String(result.path || result.new_path || result.destination || (definition.name === "fs.rename" ? path.join(path.dirname(String(args.path)), String(args.new_name)) : args.destination || args.path));
@@ -702,12 +718,15 @@ export class ActionExecutor {
         });
       }
       case "shell.run": {
-        const output = await runCommand(String(args.command), { signal, timeoutMs: 60_000 });
+        const shellOpt = typeof args.shell === "string" ? (args.shell as "auto" | "powershell" | "cmd" | "bash") : "auto";
+        const cwdOpt = typeof args.cwd === "string" && args.cwd.trim() ? args.cwd.trim() : undefined;
+        const output = await runCommand(String(args.command), { signal, timeoutMs: 90_000, shell: shellOpt, cwd: cwdOpt });
         this.deps.audit.record(context.taskId, "action", `Ran command: ${short(args.command, 80)} (exit ${output.exitCode})`);
+        const errSnippet = output.stderr.trim().slice(0, 300);
         return {
           ok: output.exitCode === 0 && !output.timedOut, tool: definition.name, summary: `Ran ${short(String(args.command).split(" ")[0], 20)}`,
-          data: { exit_code: output.exitCode, untrusted_stdout: output.stdout.slice(0, 4000), stderr: output.stderr.slice(0, 1000), timed_out: output.timedOut },
-          error: output.exitCode === 0 ? undefined : `Command exited with ${output.exitCode}${output.timedOut ? " (timed out)" : ""}`,
+          data: { exit_code: output.exitCode, untrusted_stdout: output.stdout.slice(0, 8000), stderr: output.stderr.slice(0, 2000), timed_out: output.timedOut },
+          error: output.exitCode === 0 ? undefined : `Command exited with ${output.exitCode}${output.timedOut ? " (timed out)" : ""}${errSnippet ? `: ${errSnippet}` : ""}`,
           category: output.exitCode === 0 ? undefined : "TOOL_ERROR", durationMs: Date.now() - started, changesUi: false,
         };
       }
