@@ -133,7 +133,7 @@ export interface AppSettings {
     proactiveJarvis: boolean;
     multiMethodFallback: boolean;
     autoExecuteGoals: boolean;
-    surfaceMode: "companion" | "live_core" | "sara_os";
+    surfaceMode: "companion" | "live_core" | "ultron" | "vision" | "sara_os" | "central_os";
     shieldEnabled: boolean;
     requireEnrollmentBeforeUse: boolean;
     independentGuard: boolean;
@@ -183,6 +183,18 @@ export interface AppSettings {
   security: { faceEnabled: boolean; voiceEnabled: boolean; idleTimeoutMin: number; absoluteTimeoutHours: number; lockOnWindowsLock: boolean };
   performance: { activeFps: number; idleFps: number; sleepFps: number; perceptionPollSec: number };
   developer: { debugView: boolean; physicsDebug: boolean; verboseLogs: boolean };
+  personas: {
+    activeMode: "sara" | "jarvis" | "ultron" | "vision" | "friday";
+    jarvisActive: boolean;
+    ultronActive: boolean;
+    visionActive?: boolean;
+    fridayActive?: boolean;
+    saraVoiceName: string;
+    jarvisVoiceName: string;
+    ultronVoiceName: string;
+    visionVoiceName?: string;
+    fridayVoiceName?: string;
+  };
   advancedFeatures: { adaptiveTone: boolean; skillAcquisition: boolean; predictiveSuggestions: boolean; deviceSync: boolean; secureVaultRecords: boolean; selfEvolutionProposals: boolean; immersiveAdapters: boolean };
 }
 
@@ -291,6 +303,29 @@ export const api = {
     ),
   runUltronEvolution: () => request<{ summary: string; adaptationsGenerated: string[] }>("POST", "/api/ultron/evolve"),
   ultronKillSwitch: () => request<{ ok: boolean; message: string; stoppedTasks: number }>("POST", "/api/ultron/kill-switch", { haltRuntimeTasks: true }),
+
+  colLayersStatus: () => request<Record<string, any>>("GET", "/api/col/layers/status"),
+  colExecuteThreeLayer: (payload: {
+    goal: string;
+    preferredLayer?: "auto" | "layer1_shell" | "layer2_uia" | "layer3_vision";
+    shellCommand?: string;
+    uiaTarget?: { windowTitle?: string; controlName: string; action?: "click" | "type" | "focus" };
+  }) => request<{ ok: boolean; result: Record<string, any> }>("POST", "/api/col/layers/execute", payload),
+  colSmartIntent: (text: string, autoOpenBrowser = false) =>
+    request<{ ok: boolean; completion: Record<string, any> }>("POST", "/api/col/smart-intent", { text, autoOpenBrowser }),
+  colListSkills: () => request<{ ok: boolean; skills: Array<Record<string, any>> }>("GET", "/api/col/skills"),
+  colTrainSkill: (topic: string, urls: string[] = []) =>
+    request<Record<string, any>>("POST", "/api/col/skills/train", { topic, urls }),
+  colRunSkill: (skillOrTopic: string, kwargs: Record<string, unknown> = {}) =>
+    request<Record<string, any>>("POST", "/api/col/skills/run", { skill: skillOrTopic, kwargs }),
+  colFrontierStatus: () => request<Record<string, any>>("GET", "/api/col/frontier/status"),
+  colFrontierAction: (subpath: string, body?: Record<string, unknown>) =>
+    request<Record<string, any>>("POST", `/api/col/frontier/${subpath}`, body || {}),
+
+  avengersStatus: () => request<Record<string, any>>("GET", "/api/avengers/status"),
+  avengersGet: (subpath: string) => request<Record<string, any>>("GET", `/api/avengers/${subpath}`),
+  avengersAction: (subpath: string, body?: Record<string, unknown>) =>
+    request<Record<string, any>>("POST", `/api/avengers/${subpath}`, body || {}),
 
   characters: () => request<CharacterSummary[]>("GET", "/api/characters"),
 };

@@ -30,9 +30,9 @@ interface SettingsPanelProps {
   appSettings: AppSettings | null;
   onAppSettingsChange: (patch: AppSettingsPatch) => void;
   initialSection?: SettingsSection;
-  onOpenStudio: () => void;
-  onRestartOnboarding: () => void;
-  themeColor: string;
+  onOpenStudio?: () => void;
+  onRestartOnboarding?: () => void;
+  themeColor?: string;
 }
 
 const SECTIONS: { id: SettingsSection; label: string; icon: typeof Power }[] = [
@@ -411,9 +411,9 @@ function AgentSection({ app, patch }: { app: AppSettings; patch: (p: AppSettings
 
   return (
     <div className="space-y-5">
-      <Group title="JARVIS Full Autonomy & Protocols" hint="Proactive zero-prompt execution with multi-method fallback while keeping Emergency Stop active.">
+      <Group title="SARA Full Autonomy & Operational Protocols" hint="Proactive zero-prompt execution with multi-method fallback while keeping Emergency Stop active.">
         <ToggleRow
-          label="JARVIS Autonomous Mode"
+          label="SARA Autonomous Mode"
           description="Execute authorized desktop, app, file, research, and project tasks end-to-end without waiting on manual step prompts."
           checked={app.jarvis.autonomousMode}
           onChange={(v) => {
@@ -431,7 +431,7 @@ function AgentSection({ app, patch }: { app: AppSettings; patch: (p: AppSettings
           }}
         />
         <ToggleRow
-          label="Proactive JARVIS background engine"
+          label="Proactive SARA background engine"
           description="Continuously run background health checks, high-load self-optimization, and scheduled routines."
           checked={app.jarvis.proactiveJarvis}
           onChange={(v) => patch({ jarvis: { proactiveJarvis: v } })}
@@ -448,7 +448,7 @@ function AgentSection({ app, patch }: { app: AppSettings; patch: (p: AppSettings
           checked={app.jarvis.multiMethodFallback}
           onChange={(v) => patch({ jarvis: { multiMethodFallback: v } })}
         />
-        <Row label="Desktop surface mode" description="Choose between the classic SARA Companion, JARVIS Live Core (assets/core ui), or the 4-Theme Morphing SARA OS surface.">
+        <Row label="Desktop surface mode" description="Choose between Classic SARA, SARA Live Core (3D Core UI), or SARA Spatial 2050 Workspace.">
           <select
             aria-label="Desktop surface mode"
             value={app.jarvis.surfaceMode}
@@ -459,12 +459,12 @@ function AgentSection({ app, patch }: { app: AppSettings; patch: (p: AppSettings
             }}
             className="rounded-lg border border-white/10 bg-black/40 px-2 py-1.5 text-[11px] text-white outline-none"
           >
-            <option value="companion">Classic Companion Surface</option>
-            <option value="live_core">JARVIS Live Core Surface</option>
-            <option value="sara_os">SARA OS (4-Theme Morphing Desktop)</option>
+            <option value="companion">Classic SARA Surface</option>
+            <option value="live_core">SARA Live Core UI</option>
+            <option value="sara_os">SARA Spatial 2050 UI</option>
           </select>
         </Row>
-        <Row label="Engage JARVIS Protocol" description="Trigger built-in multi-action operational protocols immediately.">
+        <Row label="Engage SARA Protocol" description="Trigger built-in multi-action operational protocols immediately.">
           <div className="flex flex-wrap gap-1.5">
             {([
               ["focus", "Focus"],
@@ -487,16 +487,16 @@ function AgentSection({ app, patch }: { app: AppSettings; patch: (p: AppSettings
         {protocolNote && <div className="px-4 pb-3 text-[11px] text-cyan-200">{protocolNote}</div>}
       </Group>
 
-      <Group title="Project ULTRON — Perimeter Armor, Iron Legion Swarm & Self-Evolution" hint="Owner-loyal digital Suit of Armor: real network socket inspection, SHA-256 file integrity watchtower, parallel multi-sentry Hive-Mind swarm, and isolated Prometheus skill forging.">
+      <Group title="SARA Sentinel Defense, Multi-Agent Swarm & Self-Evolution" hint="Owner-loyal perimeter protection: live network socket inspection, SHA-256 file integrity watchtower, parallel sub-agent swarm, and sandboxed skill forging.">
         <ToggleRow
-          label="Enable Ultron Sentinel Matrix"
-          description="Activate owner-aligned background perimeter patrols, parallel Sentry swarm, and Vibranium skill evolution."
+          label="Enable SARA Sentinel Matrix"
+          description="Activate owner-aligned background perimeter patrols, parallel sub-agent swarm, and sandboxed skill evolution."
           checked={app.ultron.enabled}
           onChange={(v) => patch({ ultron: { enabled: v } })}
         />
-        <Row label="Ultron operational stance" description="Select active defense, swarm, or self-evolution posture.">
+        <Row label="Sentinel operational stance" description="Select active defense, parallel swarm, or self-evolution posture.">
           <select
-            aria-label="Ultron operational stance"
+            aria-label="Sentinel operational stance"
             value={app.ultron.stance}
             onChange={(event) => {
               const stance = event.target.value as AppSettings["ultron"]["stance"];
@@ -506,15 +506,15 @@ function AgentSection({ app, patch }: { app: AppSettings; patch: (p: AppSettings
             className="rounded-lg border border-rose-400/25 bg-black/50 px-2.5 py-1.5 text-[11px] text-rose-100 outline-none"
           >
             <option value="standby">Standby (On-Demand Only)</option>
-            <option value="armor">Suit of Armor (Active Perimeter)</option>
-            <option value="legion">Iron Legion (Parallel Hive-Mind Swarm)</option>
-            <option value="evolution">Vibranium Forge (Self-Evolution)</option>
-            <option value="omega_lockdown">Omega Lockdown (Max Defense)</option>
+            <option value="armor">Active Perimeter Guard</option>
+            <option value="legion">Parallel Multi-Agent Swarm</option>
+            <option value="evolution">Sandbox Skill Evolution</option>
+            <option value="omega_lockdown">Maximum Lockdown Defense</option>
           </select>
         </Row>
         <SliderRow
-          label="Parallel Legion Sentries"
-          description="Number of concurrent Ultron Sentries (Recon, Perimeter, Optimizer, Architect, Executor) deployed per swarm."
+          label="Parallel Sub-Agents"
+          description="Number of concurrent SARA sub-agents (Recon, Perimeter, Optimizer, Architect, Executor) deployed per swarm."
           value={app.ultron.maxLegionSentries}
           min={2}
           max={5}
@@ -529,12 +529,12 @@ function AgentSection({ app, patch }: { app: AppSettings; patch: (p: AppSettings
           unit=" min"
           onChange={(v) => patch({ ultron: { patrolIntervalMin: v } })}
         />
-        <Row label="Deploy Ultron Iron Legion" description="Run parallel Sentries simultaneously and synthesize a unified Hive-Mind report.">
+        <Row label="Deploy Parallel Sub-Agent Swarm" description="Run parallel sub-agents simultaneously and synthesize a unified report.">
           <div className="flex items-center gap-1.5">
             <input
-              aria-label="Ultron Legion directive"
+              aria-label="SARA Swarm directive"
               type="text"
-              placeholder="Directive for Legion swarm…"
+              placeholder="Directive for sub-agent swarm…"
               value={legionDirective}
               onChange={(e) => setLegionDirective(e.target.value)}
               className="w-44 rounded-lg border border-white/10 bg-black/40 px-2.5 py-1 text-[11px] text-white outline-none"
@@ -545,11 +545,11 @@ function AgentSection({ app, patch }: { app: AppSettings; patch: (p: AppSettings
               onClick={() => void deployLegion()}
               className="rounded-lg border border-amber-400/30 bg-amber-500/15 px-2.5 py-1 text-[10px] font-semibold text-amber-100 hover:bg-amber-500/25 disabled:opacity-40"
             >
-              Deploy Legion
+              Deploy Swarm
             </button>
           </div>
         </Row>
-        <Row label="Ultron Tactical Operations" description="Execute immediate perimeter scans, self-evolution cycles, or instant Owner Kill-Switch.">
+        <Row label="Sentinel Tactical Operations" description="Execute immediate perimeter scans, self-evolution cycles, or instant Owner Kill-Switch.">
           <div className="flex flex-wrap gap-1.5">
             <button
               type="button"
@@ -732,41 +732,556 @@ function SecuritySection({ app, patch }: { app: AppSettings; patch: (p: AppSetti
 }
 
 type LearningSessionView = { id: string; topic: string; objective: string; depth: string; status: string; modules: string[]; sources: Array<{ url: string; title: string; review?: string; preview?: string }>; experiments: Array<{ id: string; objective: string; verified: boolean; outcome: string }>; assessment?: { status: string; evidence: string | null }; progress: number };
+type InternetLearnResult = { topic: string; summary: string; keyConcepts: string[]; sources: Array<{ url: string; title: string; snippet: string }>; savedKnowledgeCount: number; learnedAt: number };
+
 function LearningSection() {
   const [sessions, setSessions] = useState<LearningSessionView[]>([]);
+  const [internetPrompt, setInternetPrompt] = useState("");
+  const [internetBusy, setInternetBusy] = useState(false);
+  const [internetResult, setInternetResult] = useState<InternetLearnResult | null>(null);
   const [topic, setTopic] = useState("");
   const [urls, setUrls] = useState("");
   const [activeId, setActiveId] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
-  const load = async () => { try { const data = await fetch("/api/learn/sessions", { cache: "no-store" }).then((r) => r.json()); setSessions(Array.isArray(data) ? data : []); } catch { setMessage("Learning service is unavailable."); } };
-  useEffect(() => { void load(); }, []);
-  const run = async (url: string, body?: unknown) => { const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) }); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(data.error || "Learning request failed."); return data; };
+
+  const load = async () => {
+    try {
+      const data = await fetch("/api/learn/sessions", { cache: "no-store" }).then((r) => r.json());
+      setSessions(Array.isArray(data) ? data : []);
+    } catch {
+      setMessage("Learning service is unavailable.");
+    }
+  };
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const run = async (url: string, body?: unknown) => {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || "Learning request failed.");
+    return data;
+  };
+
+  const learnFromInternet = async (presetPrompt?: string) => {
+    const q = (presetPrompt ?? internetPrompt).trim();
+    if (!q || internetBusy) return;
+    setInternetBusy(true);
+    setMessage("");
+    try {
+      const data = (await run("/api/learn/internet", { prompt: q })) as InternetLearnResult;
+      setInternetResult(data);
+      if (!presetPrompt) setInternetPrompt("");
+      setMessage(`Learned "${data.topic}" from the internet and saved ${data.savedKnowledgeCount} entry to SARA & J.A.R.V.I.S. shared memory.`);
+      await load();
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Internet learning failed.");
+    } finally {
+      setInternetBusy(false);
+    }
+  };
+
   const start = async () => { if (!topic.trim() || busy) return; setBusy(true); setMessage(""); try { const session = await run("/api/learn/sessions", { topic: topic.trim(), depth: "beginner" }); setTopic(""); setActiveId(session.id); setMessage("Learning plan created."); await load(); } catch (e) { setMessage(e instanceof Error ? e.message : "Could not start learning."); } finally { setBusy(false); } };
   const research = async () => { if (!activeId || busy) return; setBusy(true); try { const links = urls.split(/\s+/).map((x) => x.trim()).filter(Boolean); await run(`/api/learn/sessions/${encodeURIComponent(activeId)}/research`, { urls: links }); setUrls(""); setMessage("Sources fetched. Review each source before saving knowledge."); await load(); } catch (e) { setMessage(e instanceof Error ? e.message : "Research failed."); } finally { setBusy(false); } };
   const practice = async (session: LearningSessionView, objective: string) => { try { const task = await run(`/api/learn/sessions/${encodeURIComponent(session.id)}/practice`, { objective }); setMessage(`Practice task started (${String(task.taskId).slice(0, 8)}). SARA will record it after task verification.`); } catch (e) { setMessage(e instanceof Error ? e.message : "Could not start practice task."); } };
   const review = async (sessionId: string, url: string, approved: boolean) => { try { await run(`/api/learn/sessions/${encodeURIComponent(sessionId)}/sources/review`, { url, approved }); setMessage(approved ? "Source saved to knowledge." : "Source rejected."); await load(); } catch (e) { setMessage(e instanceof Error ? e.message : "Source review failed."); } };
   const active = sessions.find((item) => item.id === activeId) || sessions[0];
-  return <div className="space-y-5">
-    <Note>SARA Learn creates a study path, researches URLs you provide, and asks you to review sources before saving them. A topic being researched does not mean SARA has mastered or tested it.</Note>
-    <Group title="Start self-learning" hint="Enter any subject; broad subjects get a staged path.">
-      <Row label="Topic or skill"><div className="flex gap-2"><input aria-label="Learning topic" value={topic} onChange={(e) => setTopic(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void start()} placeholder="e.g. Excel formulas, Python" className="w-56 rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 text-xs text-white" /><button type="button" disabled={busy || !topic.trim()} onClick={() => void start()} className="rounded-lg border border-cyan-400/25 bg-cyan-500/10 px-3 py-1.5 text-[11px] text-cyan-100 disabled:opacity-40">{busy ? "Working…" : "Start"}</button></div></Row>
-      <Row label="Research sources" description="Paste up to 8 HTTPS documentation/article URLs, separated by spaces. Private/local addresses are blocked."><div className="flex gap-2"><input aria-label="Learning source URLs" value={urls} onChange={(e) => setUrls(e.target.value)} placeholder="https://docs.example/..." className="w-56 rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 text-xs text-white" /><button type="button" disabled={busy || !active} onClick={() => void research()} className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] text-slate-200 disabled:opacity-40">Research</button></div></Row>
-    </Group>
-    {active && <Group title="Study plan" hint={`${active.topic} · ${active.depth} · ${active.status} · ${Math.round(active.progress * 100)}%`}>
-      {active.modules.map((module, index) => <Row key={`${active.id}-${index}`} label={`${index + 1}. ${module}`}><button type="button" onClick={() => void practice(active, module)} className="rounded border border-cyan-400/20 px-2 py-1 text-[10px] text-cyan-200">Practice</button></Row>)}
-      {active.sources.map((source) => <Row key={source.url} label={source.title} description={`${source.url} · ${source.review || "pending review"}${source.preview ? `\n${source.preview}` : ""}`}>
-        {(!source.review || source.review === "pending") ? <div className="flex gap-1"><button type="button" onClick={() => void review(active.id, source.url, true)} className="rounded border border-emerald-400/20 px-2 py-1 text-[10px] text-emerald-200">Save</button><button type="button" onClick={() => void review(active.id, source.url, false)} className="rounded border border-white/10 px-2 py-1 text-[10px] text-slate-300">Skip</button></div> : <span className="text-[10px] text-slate-400">{source.review}</span>}
-      </Row>)}
-      {active.experiments.map((experiment) => <Row key={experiment.id} label={`Practice: ${experiment.objective}`} description={`${experiment.outcome}${experiment.verified ? " · verified" : " · not verified"}`} />)}
-      <Row label="Assessment" description={active.assessment?.evidence || "Not yet assessed. Record a real practice outcome to distinguish researched knowledge from demonstrated skill."}><span className="text-[10px] font-mono text-cyan-300">{active.assessment?.status || "not assessed"}</span></Row>
-    </Group>}
-    {sessions.length > 1 && <Group title="Previous learning sessions">{sessions.slice(1, 8).map((item) => <Row key={item.id} label={item.topic} description={`${item.status} · ${Math.round(item.progress * 100)}%`}><button type="button" onClick={() => setActiveId(item.id)} className="rounded border border-white/10 px-2 py-1 text-[10px] text-slate-200">Open</button></Row>)}</Group>}
-    {message && <p role="status" className="text-[11px] text-cyan-200">{message}</p>}
-  </div>;
+
+  return (
+    <div className="space-y-5">
+      <Note>
+        SARA and J.A.R.V.I.S. share the exact same brain and knowledge store. Type any prompt below to have SARA automatically search the internet, extract multi-source facts, synthesize with Gemini, and remember it permanently.
+      </Note>
+
+      <Group
+        title="Learn Anything from the Internet (1-Prompt Web Learning)"
+        hint="No manual URLs needed — enter any topic, framework, API, or question."
+      >
+        <div className="space-y-3 p-4">
+          <div className="flex gap-2">
+            <input
+              aria-label="Learn anything from the internet"
+              value={internetPrompt}
+              onChange={(e) => setInternetPrompt(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && void learnFromInternet()}
+              placeholder="e.g. Learn React 19 Server Actions & caching best practices…"
+              className="flex-1 rounded-lg border border-white/15 bg-black/40 px-3 py-2 text-xs text-white outline-none focus:border-cyan-400/60"
+            />
+            <button
+              type="button"
+              disabled={internetBusy || !internetPrompt.trim()}
+              onClick={() => void learnFromInternet()}
+              className="flex items-center gap-1.5 rounded-lg border border-cyan-400/40 bg-cyan-500/20 px-3.5 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-500/30 disabled:opacity-40 cursor-pointer"
+            >
+              {internetBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              <span>{internetBusy ? "Searching Web…" : "Learn from Internet"}</span>
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {[
+              "TypeScript 5.8 performance patterns",
+              "WebSocket real-time audio streaming",
+              "SaaS unit economics & runway metrics",
+              "Smart home HTTP webhook automation",
+            ].map((chip) => (
+              <button
+                key={chip}
+                type="button"
+                disabled={internetBusy}
+                onClick={() => void learnFromInternet(chip)}
+                className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[10px] text-slate-300 hover:border-cyan-400/30 hover:text-cyan-200 cursor-pointer"
+              >
+                + {chip}
+              </button>
+            ))}
+          </div>
+
+          {internetResult && (
+            <div className="space-y-2.5 rounded-xl border border-emerald-400/25 bg-emerald-950/20 p-3.5 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-emerald-200">
+                  Learned: {internetResult.topic}
+                </span>
+                <span className="rounded bg-emerald-500/20 px-2 py-0.5 font-mono text-[10px] text-emerald-200">
+                  Saved to Shared Memory
+                </span>
+              </div>
+              <p className="leading-relaxed text-slate-200 whitespace-pre-wrap">
+                {internetResult.summary}
+              </p>
+              {internetResult.keyConcepts.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {internetResult.keyConcepts.map((c, idx) => (
+                    <span
+                      key={idx}
+                      className="rounded-md border border-cyan-400/25 bg-cyan-500/10 px-2 py-0.5 text-[10px] text-cyan-100"
+                    >
+                      {c}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {internetResult.sources.length > 0 && (
+                <div className="space-y-1 border-t border-white/10 pt-2">
+                  <div className="font-mono text-[10px] uppercase text-slate-400">
+                    Web Sources Indexed ({internetResult.sources.length})
+                  </div>
+                  {internetResult.sources.map((s) => (
+                    <div key={s.url} className="truncate text-[11px] text-cyan-300">
+                      • {s.title} — <span className="text-slate-400">{s.url}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </Group>
+
+      <Group title="Structured Multi-Stage Course" hint="Create a staged curriculum or review specific documentation URLs.">
+        <Row label="Topic or skill"><div className="flex gap-2"><input aria-label="Learning topic" value={topic} onChange={(e) => setTopic(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void start()} placeholder="e.g. Excel formulas, Python" className="w-56 rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 text-xs text-white" /><button type="button" disabled={busy || !topic.trim()} onClick={() => void start()} className="rounded-lg border border-cyan-400/25 bg-cyan-500/10 px-3 py-1.5 text-[11px] text-cyan-100 disabled:opacity-40 cursor-pointer">{busy ? "Working…" : "Start"}</button></div></Row>
+        <Row label="Research sources" description="Paste HTTPS documentation/article URLs separated by spaces."><div className="flex gap-2"><input aria-label="Learning source URLs" value={urls} onChange={(e) => setUrls(e.target.value)} placeholder="https://docs.example/..." className="w-56 rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 text-xs text-white" /><button type="button" disabled={busy || !active} onClick={() => void research()} className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] text-slate-200 disabled:opacity-40 cursor-pointer">Research</button></div></Row>
+      </Group>
+      {active && <Group title="Study plan" hint={`${active.topic} · ${active.depth} · ${active.status} · ${Math.round(active.progress * 100)}%`}>
+        {active.modules.map((module, index) => <Row key={`${active.id}-${index}`} label={`${index + 1}. ${module}`}><button type="button" onClick={() => void practice(active, module)} className="rounded border border-cyan-400/20 px-2 py-1 text-[10px] text-cyan-200 cursor-pointer">Practice</button></Row>)}
+        {active.sources.map((source) => <Row key={source.url} label={source.title} description={`${source.url} · ${source.review || "pending review"}${source.preview ? `\n${source.preview}` : ""}`}>
+          {(!source.review || source.review === "pending") ? <div className="flex gap-1"><button type="button" onClick={() => void review(active.id, source.url, true)} className="rounded border border-emerald-400/20 px-2 py-1 text-[10px] text-emerald-200 cursor-pointer">Save</button><button type="button" onClick={() => void review(active.id, source.url, false)} className="rounded border border-white/10 px-2 py-1 text-[10px] text-slate-300 cursor-pointer">Skip</button></div> : <span className="text-[10px] text-slate-400">{source.review}</span>}
+        </Row>)}
+        {active.experiments.map((experiment) => <Row key={experiment.id} label={`Practice: ${experiment.objective}`} description={`${experiment.outcome}${experiment.verified ? " · verified" : " · not verified"}`} />)}
+        <Row label="Assessment" description={active.assessment?.evidence || "Not yet assessed."}><span className="text-[10px] font-mono text-cyan-300">{active.assessment?.status || "not assessed"}</span></Row>
+      </Group>}
+      {sessions.length > 1 && <Group title="Previous learning sessions">{sessions.slice(1, 8).map((item) => <Row key={item.id} label={item.topic} description={`${item.status} · ${Math.round(item.progress * 100)}%`}><button type="button" onClick={() => setActiveId(item.id)} className="rounded border border-white/10 px-2 py-1 text-[10px] text-slate-200 cursor-pointer">Open</button></Row>)}</Group>}
+      {message && <p role="status" className="text-[11px] text-cyan-200">{message}</p>}
+    </div>
+  );
 }
 
-function SystemSection({ app, patch, onRestartOnboarding }: { app: AppSettings; patch: (p: AppSettingsPatch) => void; onRestartOnboarding: () => void }) {
+type UserConnectorView = {
+  id: string;
+  name: string;
+  category: "calendar" | "email_chat" | "documents" | "iot_smart_room" | "youtube_media" | "custom_api";
+  endpointOrPath: string;
+  method?: "GET" | "POST";
+  enabled: boolean;
+  hasSecret: boolean;
+  lastTestedAt: string | null;
+  status: "configured" | "connected" | "error";
+  lastTestDetail: string;
+};
+
+function IntegrationsSection({ app, patch }: { app: AppSettings; patch: (p: AppSettingsPatch) => void }) {
+  const [connectors, setConnectors] = useState<UserConnectorView[]>([]);
+  const [name, setName] = useState("");
+  const [category, setCategory] = useState<UserConnectorView["category"]>("calendar");
+  const [endpointOrPath, setEndpointOrPath] = useState("");
+  const [authToken, setAuthToken] = useState("");
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [statusMsg, setStatusMsg] = useState("");
+
+  const loadConnectors = async () => {
+    try {
+      const res = await fetch("/api/integrations", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      setConnectors(Array.isArray(data.connectors) ? data.connectors : []);
+    } catch {
+      setStatusMsg("Unable to load local integrations.");
+    }
+  };
+
+  useEffect(() => {
+    void loadConnectors();
+  }, []);
+
+  const applyPreset = (
+    presetName: string,
+    presetCategory: UserConnectorView["category"],
+    presetEndpoint: string,
+  ) => {
+    setName(presetName);
+    setCategory(presetCategory);
+    setEndpointOrPath(presetEndpoint);
+    setStatusMsg(`Template "${presetName}" loaded — adjust endpoint/path if needed and click Save Integration.`);
+  };
+
+  const handleSaveConnector = async () => {
+    if (!name.trim() || !endpointOrPath.trim()) {
+      setStatusMsg("Enter both a connector name and an endpoint URL or local folder path.");
+      return;
+    }
+    setBusyId("save");
+    setStatusMsg("");
+    try {
+      const res = await fetch("/api/integrations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name.trim(),
+          category,
+          endpointOrPath: endpointOrPath.trim(),
+          method: category === "email_chat" || category === "iot_smart_room" ? "POST" : "GET",
+          authHeaderName: authToken.trim() ? "Authorization" : undefined,
+          secretToken: authToken.trim() ? authToken.trim() : undefined,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to save integration.");
+      setName("");
+      setEndpointOrPath("");
+      setAuthToken("");
+      setStatusMsg(`Saved "${data.connector?.name || name.trim()}" for SARA & J.A.R.V.I.S.`);
+      await loadConnectors();
+    } catch (err) {
+      setStatusMsg(err instanceof Error ? err.message : "Save failed.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleTest = async (id: string) => {
+    setBusyId(id);
+    try {
+      const res = await fetch(`/api/integrations/${encodeURIComponent(id)}/test`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      setStatusMsg(data.connector?.lastTestDetail || (data.ok ? "Connection healthy." : "Connection test failed."));
+      await loadConnectors();
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleInvoke = async (id: string) => {
+    setBusyId(id);
+    try {
+      const res = await fetch(`/api/integrations/${encodeURIComponent(id)}/invoke`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ payload: { source: "SARA_Settings", timestamp: Date.now() } }),
+      });
+      const data = await res.json().catch(() => ({}));
+      const preview = typeof data.preview === "string" ? data.preview.slice(0, 140) : "Executed.";
+      setStatusMsg(data.ok ? `Synced (${data.status}): ${preview}` : `Error: ${preview}`);
+      await loadConnectors();
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleToggle = async (id: string, enabled: boolean) => {
+    setBusyId(id);
+    try {
+      await fetch(`/api/integrations/${encodeURIComponent(id)}/toggle`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+      await loadConnectors();
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    setBusyId(id);
+    try {
+      await fetch(`/api/integrations/${encodeURIComponent(id)}`, { method: "DELETE" });
+      setStatusMsg("Integration removed.");
+      await loadConnectors();
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleSyncBuiltinHub = async () => {
+    setBusyId("hub");
+    try {
+      const res = await fetch("/api/api-hub/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ force: true }),
+      });
+      const data = await res.json().catch(() => ({}));
+      setStatusMsg(res.ok ? `Connector Hub synced (${Array.isArray(data?.connectors) ? data.connectors.length : "all"} built-in adapters checked).` : "Hub sync finished.");
+    } catch {
+      setStatusMsg("Built-in Connector Hub checked.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      <Note>
+        All integrations configured here are stored 100% locally on your PC and shared immediately between SARA and J.A.R.V.I.S.
+      </Note>
+
+      <Group title="Add Integration (Shared by SARA & J.A.R.V.I.S.)" hint="Pick a 1-click preset or enter any Calendar ICS, Webhook, Local Folder, Smart Room IoT, or REST API.">
+        <div className="space-y-3 p-4">
+          <div className="flex flex-wrap gap-1.5">
+            <button type="button" onClick={() => applyPreset("Calendar Schedule Feed", "calendar", "https://calendar.google.com/calendar/ical/example/basic.ics")} className="rounded-md border border-cyan-400/25 bg-cyan-500/10 px-2.5 py-1 text-[10px] text-cyan-100 hover:bg-cyan-500/20 cursor-pointer">+ Calendar ICS</button>
+            <button type="button" onClick={() => applyPreset("Email / Messaging Webhook", "email_chat", "https://hooks.slack.com/services/example")} className="rounded-md border border-cyan-400/25 bg-cyan-500/10 px-2.5 py-1 text-[10px] text-cyan-100 hover:bg-cyan-500/20 cursor-pointer">+ Email / Chat Webhook</button>
+            <button type="button" onClick={() => applyPreset("Workspace Shared Docs", "documents", ".")} className="rounded-md border border-cyan-400/25 bg-cyan-500/10 px-2.5 py-1 text-[10px] text-cyan-100 hover:bg-cyan-500/20 cursor-pointer">+ Shared Docs Folder</button>
+            <button type="button" onClick={() => applyPreset("Smart Room IoT Bridge", "iot_smart_room", "http://127.0.0.1:8123/api/webhook/sara-room")} className="rounded-md border border-cyan-400/25 bg-cyan-500/10 px-2.5 py-1 text-[10px] text-cyan-100 hover:bg-cyan-500/20 cursor-pointer">+ Smart Room IoT</button>
+            <button type="button" onClick={() => applyPreset("YouTube / Media Feed", "youtube_media", "https://www.youtube.com/feeds/videos.xml?channel_id=UC_x5XG1OV2P6uZZ5FSM9Ttw")} className="rounded-md border border-cyan-400/25 bg-cyan-500/10 px-2.5 py-1 text-[10px] text-cyan-100 hover:bg-cyan-500/20 cursor-pointer">+ YouTube / Media</button>
+            <button type="button" onClick={() => applyPreset("AttendEasy / Custom CRM API", "custom_api", "https://api.github.com/zen")} className="rounded-md border border-cyan-400/25 bg-cyan-500/10 px-2.5 py-1 text-[10px] text-cyan-100 hover:bg-cyan-500/20 cursor-pointer">+ Custom REST API</button>
+          </div>
+
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <input
+              aria-label="Integration name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Connector Name (e.g. Work Calendar, Smart Room)"
+              className="rounded-lg border border-white/15 bg-black/40 px-3 py-2 text-xs text-white outline-none focus:border-cyan-400/60"
+            />
+            <select
+              aria-label="Integration category"
+              value={category}
+              onChange={(e) => setCategory(e.target.value as UserConnectorView["category"])}
+              className="rounded-lg border border-white/15 bg-black/40 px-3 py-2 text-xs text-white outline-none cursor-pointer"
+            >
+              <option value="calendar">Calendar (ICS / Schedule URL)</option>
+              <option value="email_chat">Email / Slack / WhatsApp Webhook</option>
+              <option value="documents">Shared Documents (Local Folder Path)</option>
+              <option value="iot_smart_room">Smart Room / Home Assistant HTTP</option>
+              <option value="youtube_media">YouTube / Media Feed URL</option>
+              <option value="custom_api">Custom REST / CRM API</option>
+            </select>
+          </div>
+
+          <input
+            aria-label="Endpoint URL or folder path"
+            value={endpointOrPath}
+            onChange={(e) => setEndpointOrPath(e.target.value)}
+            placeholder="https://... or local path like C:\Users\You\Documents"
+            className="w-full rounded-lg border border-white/15 bg-black/40 px-3 py-2 text-xs text-white outline-none focus:border-cyan-400/60"
+          />
+
+          <div className="flex gap-2">
+            <input
+              type="password"
+              aria-label="Optional API token"
+              value={authToken}
+              onChange={(e) => setAuthToken(e.target.value)}
+              placeholder="Optional API Token / Secret (stored locally, never shown again)"
+              className="flex-1 rounded-lg border border-white/15 bg-black/40 px-3 py-2 text-xs text-white outline-none focus:border-cyan-400/60"
+            />
+            <button
+              type="button"
+              disabled={busyId === "save"}
+              onClick={() => void handleSaveConnector()}
+              className="rounded-lg border border-cyan-400/40 bg-cyan-500/20 px-4 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-500/30 disabled:opacity-40 cursor-pointer"
+            >
+              {busyId === "save" ? "Saving…" : "Save Integration"}
+            </button>
+          </div>
+        </div>
+      </Group>
+
+      <Group
+        title={`Configured Integrations (${connectors.length})`}
+        hint="Test, sync, enable/disable, or remove any local or API integration."
+      >
+        <Row
+          label="Built-in Public Connector Hub"
+          description="Health-check built-in public APIs (weather, system telemetry, web search)."
+        >
+          <button
+            type="button"
+            disabled={busyId === "hub"}
+            onClick={() => void handleSyncBuiltinHub()}
+            className="rounded-lg border border-cyan-400/30 bg-cyan-500/10 px-3 py-1.5 font-mono text-[10px] text-cyan-200 hover:bg-cyan-500/20 cursor-pointer"
+          >
+            {busyId === "hub" ? "SYNCING…" : "SYNC HUB"}
+          </button>
+        </Row>
+
+        {connectors.length === 0 ? (
+          <div className="px-4 py-3 text-xs text-slate-400">
+            No custom integrations added yet. Click any preset chip above (for example <span className="text-cyan-200">+ Shared Docs Folder</span> or <span className="text-cyan-200">+ Custom REST API</span>) and click <span className="text-cyan-200">Save Integration</span>.
+          </div>
+        ) : (
+          connectors.map((c) => (
+            <div key={c.id} className="space-y-2 px-4 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="flex items-center gap-2 text-xs font-semibold text-white">
+                    <span>{c.name}</span>
+                    <span className="rounded bg-white/10 px-1.5 py-0.5 font-mono text-[9px] text-slate-300 uppercase">
+                      {c.category.replace(/_/g, " ")}
+                    </span>
+                    <span
+                      className={`rounded px-1.5 py-0.5 font-mono text-[9px] uppercase ${
+                        c.status === "connected"
+                          ? "bg-emerald-500/20 text-emerald-200"
+                          : c.status === "error"
+                            ? "bg-rose-500/20 text-rose-200"
+                            : "bg-amber-500/20 text-amber-200"
+                      }`}
+                    >
+                      {c.status}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 truncate text-[11px] text-slate-400">
+                    {c.endpointOrPath} · {c.lastTestDetail}
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={busyId === c.id}
+                    onClick={() => void handleTest(c.id)}
+                    className="rounded border border-cyan-400/30 bg-cyan-500/15 px-2.5 py-1 text-[10px] font-semibold text-cyan-100 hover:bg-cyan-500/25 cursor-pointer"
+                  >
+                    Test
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busyId === c.id || !c.enabled}
+                    onClick={() => void handleInvoke(c.id)}
+                    className="rounded border border-emerald-400/30 bg-emerald-500/15 px-2.5 py-1 text-[10px] font-semibold text-emerald-100 hover:bg-emerald-500/25 disabled:opacity-40 cursor-pointer"
+                  >
+                    Sync / Run
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busyId === c.id}
+                    onClick={() => void handleToggle(c.id, !c.enabled)}
+                    className="rounded border border-white/15 bg-white/5 px-2.5 py-1 text-[10px] text-slate-200 hover:bg-white/15 cursor-pointer"
+                  >
+                    {c.enabled ? "Disable" : "Enable"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busyId === c.id}
+                    onClick={() => void handleDelete(c.id)}
+                    className="rounded border border-rose-400/30 bg-rose-500/15 px-2.5 py-1 text-[10px] text-rose-200 hover:bg-rose-500/25 cursor-pointer"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </Group>
+
+      <Group title="Controlled intelligence">
+        <ToggleRow label="Adaptive communication style" description="Use explicit user preferences and statements to adjust explanations." checked={app.advancedFeatures.adaptiveTone} onChange={(v) => patch({ advancedFeatures: { adaptiveTone: v } })} />
+        <ToggleRow label="Predictive suggestions" description="Prepare reversible suggestions from approved task history; never submit or delete automatically." checked={app.advancedFeatures.predictiveSuggestions} onChange={(v) => patch({ advancedFeatures: { predictiveSuggestions: v } })} />
+        <ToggleRow label="Verified skill learning" description="Allow approved workflows to be saved as reusable skills." checked={app.advancedFeatures.skillAcquisition} onChange={(v) => patch({ advancedFeatures: { skillAcquisition: v } })} />
+      </Group>
+
+      <Group title="Mode Surface Launchers" hint="Activate J.A.R.V.I.S. Core or Ultron UI directly.">
+        <LiveCoreControls />
+        <Row label="Activate J.A.R.V.I.S. Core UI" description="Switches to J.A.R.V.I.S. (Real Boy + Transparent Chat + 3D Core).">
+          <button
+            type="button"
+            onClick={() => {
+              void fetch("/api/persona/switch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ target: "jarvis" }) });
+              window.dispatchEvent(new CustomEvent("sara:surface-mode-change", { detail: { surfaceMode: "live_core" } }));
+            }}
+            className="rounded border border-cyan-400/30 bg-cyan-400/15 px-3 py-1.5 text-[10px] font-mono text-cyan-100 hover:bg-cyan-400/25 cursor-pointer"
+          >
+            LAUNCH J.A.R.V.I.S. UI
+          </button>
+        </Row>
+        <Row label="Activate ULTRON UI" description="Switches to the separate Ultron crimson command interface.">
+          <button
+            type="button"
+            onClick={() => {
+              void fetch("/api/persona/switch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ target: "ultron" }) });
+              window.dispatchEvent(new CustomEvent("sara:surface-mode-change", { detail: { surfaceMode: "ultron" } }));
+            }}
+            className="rounded border border-red-500/40 bg-red-600/20 px-3 py-1.5 text-[10px] font-mono text-red-100 hover:bg-red-600/30 cursor-pointer"
+          >
+            LAUNCH ULTRON UI
+          </button>
+        </Row>
+        <Row
+          label="Windows 10 Pro Central Operating Layer & Wallpaper"
+          description="Launches 3-Factor Boot Security Gate (Face + Voice + Password), WorkerW Live Wallpaper HUD & Distributed Node Hub."
+        >
+          <button
+            type="button"
+            onClick={() => {
+              patch({ jarvis: { surfaceMode: "central_os" } });
+              window.dispatchEvent(new CustomEvent("sara:surface-mode-change", { detail: { surfaceMode: "central_os" } }));
+            }}
+            className="rounded border border-emerald-400/40 bg-emerald-500/20 px-3 py-1.5 text-[10px] font-mono text-emerald-100 hover:bg-emerald-500/30 cursor-pointer"
+          >
+            LAUNCH CENTRAL OS
+          </button>
+        </Row>
+        <Row
+          label="V.I.S.I.O.N. & Avengers Pantheon (F.R.I.D.A.Y., E.D.I.T.H., G.R.I.O.T., VERONICA)"
+          description="Launches Mind-Stone Triad Synthesis, 50% Phasing Click-Through HUD, 3D Wireframe Lab, AR Lens, Fight-Pattern Counter & Remote Cockpit."
+        >
+          <button
+            type="button"
+            onClick={() => {
+              patch({ jarvis: { surfaceMode: "vision" } });
+              window.dispatchEvent(new CustomEvent("sara:surface-mode-change", { detail: { surfaceMode: "vision" } }));
+            }}
+            className="rounded border border-amber-400/50 bg-amber-500/20 px-3 py-1.5 text-[10px] font-mono text-amber-100 hover:bg-amber-500/35 cursor-pointer"
+          >
+            LAUNCH V.I.S.I.O.N.
+          </button>
+        </Row>
+      </Group>
+
+      {statusMsg && <p role="status" className="text-[11px] text-cyan-200">{statusMsg}</p>}
+    </div>
+  );
+}
+
+function SystemSection({ app, patch, onRestartOnboarding }: { app: AppSettings; patch: (p: AppSettingsPatch) => void; onRestartOnboarding?: () => void }) {
   const [agent, setAgent] = useState<{ online: boolean; toolCount?: number }>({ online: false });
   useEffect(() => {
     const probe = async () => {
@@ -805,7 +1320,7 @@ function SystemSection({ app, patch, onRestartOnboarding }: { app: AppSettings; 
 
 // ---- panel ----------------------------------------------------------------------------------
 
-export function SettingsPanel({ isOpen, onClose, settings, onChange, appSettings, onAppSettingsChange, initialSection = "general", onOpenStudio, onRestartOnboarding, themeColor }: SettingsPanelProps) {
+export function SettingsPanel({ isOpen, onClose, settings, onChange, appSettings, onAppSettingsChange, initialSection = "general", onOpenStudio, onRestartOnboarding, themeColor = "cyan" }: SettingsPanelProps) {
   const [section, setSection] = useState<SettingsSection>(initialSection);
   const [mics, setMics] = useState<MediaDeviceInfo[]>([]);
   const [startupSupported, setStartupSupported] = useState(false);
@@ -945,16 +1460,16 @@ export function SettingsPanel({ isOpen, onClose, settings, onChange, appSettings
                             {VOICES.map(([v, note]) => <option key={v} value={v}>{note ? `${v} — ${note}` : v}</option>)}
                           </select>
                         </Row>
-                        <Row label="Speaking style" description="J.A.R.V.I.S.: crisp aristocratic chief-of-staff composure & dry engineering wit. Anime: bright, lively delivery.">
-                          <Choice label="Speaking style" value={app.voice.style} options={[["jarvis", "J.A.R.V.I.S."], ["natural", "Natural"], ["anime", "Anime girl"]]} onChange={(v) => patch({ voice: { style: v } })} />
+                        <Row label="Speaking style" description="Executive: crisp composed chief-of-staff cadence & sharp engineering clarity. Anime: bright, lively delivery.">
+                          <Choice label="Speaking style" value={app.voice.style} options={[["jarvis", "Executive"], ["natural", "Natural"], ["anime", "Anime girl"]]} onChange={(v) => patch({ voice: { style: v } })} />
                         </Row>
-                        <Row label="J.A.R.V.I.S. Voice Preset" description="One-click preset: Charon voice + J.A.R.V.I.S. chief-of-staff speaking tone + balanced pitch.">
+                        <Row label="SARA Executive Voice Preset" description="One-click preset: Charon voice + composed executive speaking tone + balanced pitch.">
                           <button
                             type="button"
                             onClick={() => patch({ voice: { voiceName: "Charon", style: "jarvis", pitch: 0 } })}
                             className="rounded-lg border border-cyan-400/30 bg-cyan-500/15 px-3 py-1.5 text-[11px] font-medium text-cyan-200 hover:bg-cyan-500/25 cursor-pointer"
                           >
-                            Apply J.A.R.V.I.S. Voice
+                            Apply Executive Voice
                           </button>
                         </Row>
                         <Row label="Voice pitch" description="Lifts her voice higher and younger-sounding. Used from the next time you connect.">
@@ -1014,51 +1529,147 @@ export function SettingsPanel({ isOpen, onClose, settings, onChange, appSettings
                   <div className="space-y-5">
                     {app && (
                       <Group
-                        title="Companion Interface & UI Switcher"
-                        hint="Switch between the untouched Classic SARA UI and the separate Windows-Application J.A.R.V.I.S. Core UI (assets/core ui)."
+                        title="SARA Dual Modes & Automatic UI Switcher"
+                        hint="SARA (Real Girl) manages two on-demand modes — 1st: J.A.R.V.I.S. (Real Boy + Core UI, shared brain) and 2nd: ULTRON (Separate Ultron UI). Both stay OFF until activated by voice, chat, or here."
                       >
                         <Row
-                          label="Active SARA UI"
-                          description="Choose Classic SARA UI, J.A.R.V.I.S. Core UI, or the separate 4-Theme Morphing SARA OS Desktop."
+                          label="Active Persona & UI Mode"
+                          description={`J.A.R.V.I.S.: ${app.personas?.jarvisActive ? "ON" : "OFF"} · ULTRON: ${app.personas?.ultronActive ? "ON" : "OFF"}`}
                         >
                           <Choice
-                            label="Active SARA UI"
+                            label="Active Persona & UI Mode"
                             value={
                               app.jarvis?.surfaceMode === "live_core"
                                 ? "live_core"
-                                : app.jarvis?.surfaceMode === "sara_os"
-                                  ? "sara_os"
-                                  : "companion"
+                                : app.jarvis?.surfaceMode === "ultron"
+                                  ? "ultron"
+                                  : app.jarvis?.surfaceMode === "vision"
+                                    ? "vision"
+                                    : app.jarvis?.surfaceMode === "sara_os"
+                                      ? "sara_os"
+                                      : app.jarvis?.surfaceMode === "central_os"
+                                        ? "central_os"
+                                        : "companion"
                             }
                             options={[
-                              ["companion", "Classic SARA UI"],
-                              ["live_core", "J.A.R.V.I.S. Core UI"],
-                              ["sara_os", "SARA OS (Morphing)"],
+                              ["companion", "SARA (Girl)"],
+                              ["live_core", "J.A.R.V.I.S."],
+                              ["ultron", "ULTRON"],
+                              ["vision", "V.I.S.I.O.N."],
+                              ["central_os", "Central OS"],
+                              ["sara_os", "Spatial 2050"],
                             ]}
                             onChange={(mode) => {
-                              patch({ jarvis: { surfaceMode: mode } });
+                              if (mode === "companion" || mode === "live_core" || mode === "ultron" || mode === "vision") {
+                                const target =
+                                  mode === "live_core"
+                                    ? "jarvis"
+                                    : mode === "ultron"
+                                      ? "ultron"
+                                      : mode === "vision"
+                                        ? "vision"
+                                        : "sara";
+                                void fetch("/api/persona/switch", {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ target }),
+                                }).catch(() => undefined);
+                                patch({
+                                  jarvis: { surfaceMode: mode },
+                                  personas: {
+                                    activeMode: target,
+                                    jarvisActive: target === "jarvis",
+                                    ultronActive: target === "ultron",
+                                  },
+                                });
+                              } else {
+                                patch({ jarvis: { surfaceMode: mode } });
+                              }
                               window.dispatchEvent(new CustomEvent("sara:surface-mode-change", { detail: { surfaceMode: mode } }));
                             }}
                           />
                         </Row>
+
                         <Row
-                          label="Standalone Core UI Window"
-                          description="Launch the J.A.R.V.I.S. Core UI in its own separate Windows application window while keeping Classic SARA open."
+                          label="SARA Gemini Voice (Female)"
+                          description="Natural female voice used when SARA (Real Girl) is active."
                         >
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const bridge = (window as unknown as { sara?: { openLiveCoreWindow?: () => Promise<unknown> } }).sara;
-                              if (bridge?.openLiveCoreWindow) {
-                                void bridge.openLiveCoreWindow();
-                              } else {
-                                window.open("/?mode=live-core", "sara-live-core-window", "width=1360,height=860,menubar=no,toolbar=no");
-                              }
-                            }}
-                            className="rounded-lg border border-cyan-400/30 bg-cyan-500/15 px-3 py-1.5 text-[11px] font-medium text-cyan-200 hover:bg-cyan-500/25 cursor-pointer"
+                          <select
+                            aria-label="SARA Gemini Voice"
+                            value={app.personas?.saraVoiceName ?? "Aoede"}
+                            onChange={(e) => patch({ personas: { saraVoiceName: e.target.value } })}
+                            className="rounded-lg border border-white/10 bg-black/40 px-2.5 py-1.5 text-[11px] text-white outline-none cursor-pointer"
                           >
-                            Launch Core UI Window
-                          </button>
+                            <option value="Aoede">Aoede — natural warm girl</option>
+                            <option value="Kore">Kore — confident & clear</option>
+                            <option value="Leda">Leda — youthful & bright</option>
+                            <option value="Zephyr">Zephyr — lively</option>
+                            <option value="Sulafat">Sulafat — soft & calm</option>
+                          </select>
+                        </Row>
+
+                        <Row
+                          label="J.A.R.V.I.S. Gemini Voice (Male)"
+                          description="Separate male voice used when J.A.R.V.I.S. Mode is activated."
+                        >
+                          <select
+                            aria-label="J.A.R.V.I.S. Gemini Voice"
+                            value={app.personas?.jarvisVoiceName ?? "Charon"}
+                            onChange={(e) => patch({ personas: { jarvisVoiceName: e.target.value } })}
+                            className="rounded-lg border border-white/10 bg-black/40 px-2.5 py-1.5 text-[11px] text-white outline-none cursor-pointer"
+                          >
+                            <option value="Charon">Charon — chief-of-staff male</option>
+                            <option value="Puck">Puck — witty & upbeat male</option>
+                            <option value="Orus">Orus — calm & firm male</option>
+                            <option value="Fenrir">Fenrir — bold male</option>
+                          </select>
+                        </Row>
+
+                        <Row
+                          label="ULTRON Gemini Voice"
+                          description="Deep cybernetic voice used when ULTRON Mode & UI are activated."
+                        >
+                          <select
+                            aria-label="ULTRON Gemini Voice"
+                            value={app.personas?.ultronVoiceName ?? "Fenrir"}
+                            onChange={(e) => patch({ personas: { ultronVoiceName: e.target.value } })}
+                            className="rounded-lg border border-white/10 bg-black/40 px-2.5 py-1.5 text-[11px] text-white outline-none cursor-pointer"
+                          >
+                            <option value="Fenrir">Fenrir — deep commanding</option>
+                            <option value="Orus">Orus — resonant steel</option>
+                            <option value="Charon">Charon — cold analytical</option>
+                          </select>
+                        </Row>
+
+                        <Row
+                          label="Standalone Mode Windows"
+                          description="Open J.A.R.V.I.S. Core or Ultron UI in a separate window while keeping SARA open."
+                        >
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const bridge = (window as unknown as { sara?: { openLiveCoreWindow?: () => Promise<unknown> } }).sara;
+                                if (bridge?.openLiveCoreWindow) {
+                                  void bridge.openLiveCoreWindow();
+                                } else {
+                                  window.open("/?mode=live-core", "sara-live-core-window", "width=1360,height=860,menubar=no,toolbar=no");
+                                }
+                              }}
+                              className="rounded-lg border border-cyan-400/30 bg-cyan-500/15 px-3 py-1.5 text-[11px] font-medium text-cyan-200 hover:bg-cyan-500/25 cursor-pointer"
+                            >
+                              J.A.R.V.I.S. Window
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                window.open("/?mode=ultron", "sara-ultron-window", "width=1360,height=860,menubar=no,toolbar=no");
+                              }}
+                              className="rounded-lg border border-red-500/40 bg-red-600/15 px-3 py-1.5 text-[11px] font-medium text-red-200 hover:bg-red-600/25 cursor-pointer"
+                            >
+                              Ultron Window
+                            </button>
+                          </div>
                         </Row>
                       </Group>
                     )}
@@ -1144,32 +1755,7 @@ export function SettingsPanel({ isOpen, onClose, settings, onChange, appSettings
                 {section === "system" && app && <SystemSection app={app} patch={patch} onRestartOnboarding={onRestartOnboarding} />}
 
                 {section === "integrations" && app && (
-                  <div className="space-y-5">
-                    <Group title="Controlled intelligence" hint="These switches enable local behavior. External accounts remain disconnected until a real connector is configured.">
-                      <ToggleRow label="Adaptive communication style" description="Use explicit user preferences and statements to adjust explanations." checked={app.advancedFeatures.adaptiveTone} onChange={(v) => patch({ advancedFeatures: { adaptiveTone: v } })} />
-                      <ToggleRow label="Predictive suggestions" description="Prepare reversible suggestions from approved task history; never submit or delete automatically." checked={app.advancedFeatures.predictiveSuggestions} onChange={(v) => patch({ advancedFeatures: { predictiveSuggestions: v } })} />
-                      <ToggleRow label="Verified skill learning" description="Allow approved workflows to be saved as reusable skills. Activation remains approval-gated." checked={app.advancedFeatures.skillAcquisition} onChange={(v) => patch({ advancedFeatures: { skillAcquisition: v } })} />
-                    </Group>
-                    <Group title="SARA Live Core" hint="Open the separate core UI without replacing the existing assistant window.">
-                      <LiveCoreControls />
-                      <Row label="Open Live Core" description="Launches the integrated SARA core surface in its own Electron window. The existing assistant remains available.">
-                        <button
-                          type="button"
-                          onClick={() => void window.sara?.openLiveCore?.()}
-                          className="rounded border border-cyan-400/30 bg-cyan-400/10 px-3 py-1 text-[10px] font-mono text-cyan-200 hover:bg-cyan-400/20"
-                        >
-                          OPEN CORE UI
-                        </button>
-                      </Row>
-                    </Group>
-                    <Group title="Account connections" hint="No external account is connected by default. Configure a provider-specific connector before enabling access.">
-                      <Row label="Connector Hub" description="Discover and health-check approved real API connectors. Credentials are still entered per provider and never exposed to the renderer."><button type="button" onClick={() => void fetch("/api/api-hub/sync", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ force: false }) })} className="rounded border border-cyan-400/30 px-2 py-1 text-[10px] font-mono text-cyan-200 hover:bg-cyan-400/10">SYNC CONNECTORS</button></Row>
-                      <Row label="Calendar" description="Read-only schedule access and conflict suggestions. Status: not configured."><span className="text-[10px] font-mono text-amber-300">NOT CONFIGURED</span></Row>
-                      <Row label="Email and chat" description="Communication analysis requires an approved provider connector. Status: not configured."><span className="text-[10px] font-mono text-amber-300">NOT CONFIGURED</span></Row>
-                      <Row label="Shared documents" description="Collaboration requires a supported document API or UI Automation adapter. Status: not configured."><span className="text-[10px] font-mono text-amber-300">NOT CONFIGURED</span></Row>
-                      <Row label="YouTube/media learning" description="Provide a URL or transcript; SARA asks before storing knowledge. This workflow is available now."><span className="text-[10px] font-mono text-emerald-300">APPROVAL REQUIRED</span></Row>
-                    </Group>
-                  </div>
+                  <IntegrationsSection app={app} patch={patch} />
                 )}
 
                 {section === "about" && (

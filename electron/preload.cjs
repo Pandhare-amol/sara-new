@@ -54,6 +54,10 @@ const saraBridge = {
   windowClose: () => ipcRenderer.invoke('window:close'),
   windowAlwaysOnTop: (enabled) => ipcRenderer.invoke('window:always-on-top', typeof enabled === 'boolean' ? enabled : undefined),
   windowGetState: () => ipcRenderer.invoke('window:get-state'),
+  setWallpaperMode: (enabled) => ipcRenderer.invoke('wallpaper:set-enabled', Boolean(enabled)),
+  getWallpaperStatus: () => ipcRenderer.invoke('wallpaper:get-status'),
+  setVisionPhaseMode: (enabled, opacity = 0.5) =>
+    ipcRenderer.invoke('vision:set-phase', { enabled: Boolean(enabled), opacity }),
   onLiveCoreSurfaceStatus: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('live-core:surface-status', listener);

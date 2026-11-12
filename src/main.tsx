@@ -10,37 +10,91 @@ import './index.css';
 // The desktop companion window loads the same bundle with ?mode=companion and
 // renders only the character, without the app shell or key gate.
 const CompanionApp = lazy(() => import('./companion/CompanionApp.tsx'));
-// Live Core (assets/core ui) is kept completely separate from Classic SARA UI.
+// J.A.R.V.I.S. Live Core (assets/core ui) is kept completely separate from Classic SARA UI.
 const LiveCoreApp = lazy(() =>
   import('../assets/core ui/src/sara-live-core/LiveCoreApp.tsx').then((module) => ({
     default: module.LiveCoreApp,
   })),
 );
-// SARA OS 4-Theme Morphing Futuristic Desktop is also completely separate from Classic SARA UI.
+// Separate ULTRON Cybernetic Hive-Mind UI.
+const UltronApp = lazy(() =>
+  import('./ultron_ui/UltronApp.tsx').then((module) => ({
+    default: module.UltronApp,
+  })),
+);
+// SARA Spatial 2050 Desktop is also completely separate from Classic SARA UI.
 const SaraOsApp = lazy(() =>
   import('./sara_os/SaraOsApp.tsx').then((module) => ({
     default: module.SaraOsApp,
   })),
 );
+// Windows 10 Pro Central Operating Layer + Live Wallpaper + 3-Factor Boot Gate UI.
+const CentralOsApp = lazy(() =>
+  import('./central_os/CentralOsApp.tsx').then((module) => ({
+    default: module.CentralOsApp,
+  })),
+);
+// V.I.S.I.O.N. & Avengers AI Pantheon Deck + E.D.I.T.H. AR Lens + G.R.I.O.T. Remote Cockpit.
+const VisionApp = lazy(() =>
+  import('./vision_ui/VisionApp.tsx').then((module) => ({
+    default: module.VisionApp,
+  })),
+);
+const EdithArLensView = lazy(() =>
+  import('./vision_ui/EdithArLensView.tsx').then((module) => ({
+    default: module.EdithArLensView,
+  })),
+);
+const GriotRemoteCockpitView = lazy(() =>
+  import('./vision_ui/GriotRemoteCockpitView.tsx').then((module) => ({
+    default: module.GriotRemoteCockpitView,
+  })),
+);
+
+type SurfaceMode = 'companion' | 'live_core' | 'ultron' | 'vision' | 'sara_os' | 'central_os';
+
+const isValidSurface = (val: unknown): val is SurfaceMode =>
+  val === 'companion' ||
+  val === 'live_core' ||
+  val === 'ultron' ||
+  val === 'vision' ||
+  val === 'sara_os' ||
+  val === 'central_os';
 
 const urlMode = new URLSearchParams(location.search).get('mode');
+const pathname = location.pathname.replace(/\/+$/, '') || '/';
 const isCompanion = urlMode === 'companion';
+const isEdithRoute = pathname === '/edith' || urlMode === 'edith';
+const isGriotRoute = pathname === '/remote-cockpit' || urlMode === 'remote-cockpit';
 const forceLiveCore = urlMode === 'live-core';
+const forceUltron = urlMode === 'ultron';
+const forceVision = urlMode === 'vision';
 const forceSaraOs = urlMode === 'sara-os';
+const forceCentralOs = urlMode === 'central-os';
 const forceClassic = urlMode === 'classic';
 
 function RootSurfaceRouter() {
-  const [surfaceMode, setSurfaceMode] = useState<'companion' | 'live_core' | 'sara_os'>(
-    forceLiveCore ? 'live_core' : forceSaraOs ? 'sara_os' : 'companion',
+  const [surfaceMode, setSurfaceMode] = useState<SurfaceMode>(
+    forceLiveCore
+      ? 'live_core'
+      : forceUltron
+      ? 'ultron'
+      : forceVision
+      ? 'vision'
+      : forceSaraOs
+      ? 'sara_os'
+      : forceCentralOs
+      ? 'central_os'
+      : 'companion',
   );
 
   useEffect(() => {
-    if (forceLiveCore || forceSaraOs || forceClassic) return;
+    if (forceLiveCore || forceUltron || forceVision || forceSaraOs || forceCentralOs || forceClassic) return;
     let cancelled = false;
     void api
       .appSettings()
       .then((s) => {
-        if (!cancelled && (s?.jarvis?.surfaceMode === 'live_core' || s?.jarvis?.surfaceMode === 'sara_os')) {
+        if (!cancelled && isValidSurface(s?.jarvis?.surfaceMode)) {
           setSurfaceMode(s.jarvis.surfaceMode);
         }
       })
@@ -48,42 +102,57 @@ function RootSurfaceRouter() {
 
     const onCustomSwitch = (ev: Event) => {
       const detail = (ev as CustomEvent<{surfaceMode?: string}>).detail;
-      if (detail?.surfaceMode === 'live_core' || detail?.surfaceMode === 'sara_os' || detail?.surfaceMode === 'companion') {
+      if (isValidSurface(detail?.surfaceMode)) {
         setSurfaceMode(detail.surfaceMode);
       }
     };
     window.addEventListener('sara:surface-mode-change', onCustomSwitch);
 
     let ws: WebSocket | null = null;
-    try {
-      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      ws = new WebSocket(`${proto}//${location.host}/events`);
-      ws.onmessage = (e) => {
-        try {
-          const msg = JSON.parse(String(e.data));
-          if (msg?.type === 'settings') {
-            const nextMode = msg.settings?.jarvis?.surfaceMode;
-            if (nextMode === 'live_core' || nextMode === 'sara_os' || nextMode === 'companion') {
-              setSurfaceMode(nextMode);
+    let reconnectTimer: number | null = null;
+
+    const connectEventsWs = () => {
+      if (cancelled) return;
+      try {
+        const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        ws = new WebSocket(`${proto}//${location.host}/events`);
+        ws.onmessage = (e) => {
+          try {
+            const msg = JSON.parse(String(e.data));
+            const nextFromEvent =
+              msg?.type === 'model.status' && msg?.payload?.kind === 'settings_changed'
+                ? msg.payload.surfaceMode
+                : msg?.type === 'settings'
+                ? msg.settings?.jarvis?.surfaceMode
+                : undefined;
+            if (isValidSurface(nextFromEvent)) {
+              setSurfaceMode(nextFromEvent);
             }
+          } catch {
+            // Ignore malformed event
           }
-        } catch {
-          // Ignore malformed event
-        }
-      };
-    } catch {
-      // Ignore WS connect errors
-    }
+        };
+        ws.onclose = () => {
+          if (!cancelled) {
+            reconnectTimer = window.setTimeout(connectEventsWs, 2500);
+          }
+        };
+      } catch {
+        // Ignore WS connect errors
+      }
+    };
+    connectEventsWs();
 
     return () => {
       cancelled = true;
       window.removeEventListener('sara:surface-mode-change', onCustomSwitch);
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
       ws?.close();
     };
   }, []);
 
-  const handleSwitchSurface = useCallback((target: 'companion' | 'live_core') => {
-    if ((forceLiveCore || forceSaraOs) && target === 'companion') {
+  const handleSwitchSurface = useCallback((target: SurfaceMode) => {
+    if ((forceLiveCore || forceUltron || forceVision || forceSaraOs || forceCentralOs) && target === 'companion') {
       const bridge = (window as unknown as {
         sara?: {focusMainShell?: () => Promise<unknown>; windowClose?: () => Promise<unknown>};
       }).sara;
@@ -95,7 +164,25 @@ function RootSurfaceRouter() {
       return;
     }
     setSurfaceMode(target);
-    void api.updateAppSettings({jarvis: {surfaceMode: target}}).catch(() => undefined);
+    if (target === 'companion' || target === 'live_core' || target === 'ultron' || target === 'vision') {
+      const personaTarget =
+        target === 'live_core'
+          ? 'jarvis'
+          : target === 'ultron'
+            ? 'ultron'
+            : target === 'vision'
+              ? 'vision'
+              : 'sara';
+      void fetch('/api/persona/switch', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({target: personaTarget}),
+      }).catch(() => {
+        void api.updateAppSettings({jarvis: {surfaceMode: target}}).catch(() => undefined);
+      });
+    } else {
+      void api.updateAppSettings({jarvis: {surfaceMode: target}}).catch(() => undefined);
+    }
   }, []);
 
   const handleSwitchToClassicShell = useCallback(() => {
@@ -110,12 +197,59 @@ function RootSurfaceRouter() {
     );
   }
 
+  if (isEdithRoute) {
+    return (
+      <Suspense fallback={null}>
+        <div className="h-screen w-screen bg-[#020916] p-2">
+          <EdithArLensView onBack={() => { window.location.href = '/'; }} />
+        </div>
+      </Suspense>
+    );
+  }
+
+  if (isGriotRoute) {
+    return (
+      <Suspense fallback={null}>
+        <div className="h-screen w-screen bg-[#050314] p-2">
+          <GriotRemoteCockpitView onBack={() => { window.location.href = '/'; }} />
+        </div>
+      </Suspense>
+    );
+  }
+
+  if (surfaceMode === 'vision') {
+    return (
+      <ApiKeyGate>
+        <Suspense fallback={null}>
+          <VisionApp onSwitchSurface={handleSwitchSurface} />
+        </Suspense>
+      </ApiKeyGate>
+    );
+  }
+
   if (surfaceMode === 'live_core') {
     return (
       <OwnerAuthGate>
-        <Suspense fallback={null}>
-          <LiveCoreApp onSwitchToExistingShell={handleSwitchToClassicShell} />
-        </Suspense>
+        <ApiKeyGate>
+          <Suspense fallback={null}>
+            <LiveCoreApp
+              onSwitchToExistingShell={handleSwitchToClassicShell}
+              onSwitchSurface={handleSwitchSurface}
+            />
+          </Suspense>
+        </ApiKeyGate>
+      </OwnerAuthGate>
+    );
+  }
+
+  if (surfaceMode === 'ultron') {
+    return (
+      <OwnerAuthGate>
+        <ApiKeyGate>
+          <Suspense fallback={null}>
+            <UltronApp onSwitchSurface={handleSwitchSurface} />
+          </Suspense>
+        </ApiKeyGate>
       </OwnerAuthGate>
     );
   }
@@ -123,10 +257,22 @@ function RootSurfaceRouter() {
   if (surfaceMode === 'sara_os') {
     return (
       <OwnerAuthGate>
-        <Suspense fallback={null}>
-          <SaraOsApp onSwitchSurface={handleSwitchSurface} />
-        </Suspense>
+        <ApiKeyGate>
+          <Suspense fallback={null}>
+            <SaraOsApp onSwitchSurface={handleSwitchSurface} />
+          </Suspense>
+        </ApiKeyGate>
       </OwnerAuthGate>
+    );
+  }
+
+  if (surfaceMode === 'central_os') {
+    return (
+      <ApiKeyGate>
+        <Suspense fallback={null}>
+          <CentralOsApp onSwitchSurface={handleSwitchSurface} />
+        </Suspense>
+      </ApiKeyGate>
     );
   }
 

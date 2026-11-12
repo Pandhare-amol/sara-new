@@ -28,6 +28,7 @@ import { ResourceScheduler, InputArbiter } from "../agent/scheduler";
 import { DownloadManager } from "../agent/downloads";
 import { ContactBook } from "../memory/contacts";
 import { WorkingMemory } from "../memory/workingMemory";
+import { Sara2050Engine, anonymizeSensitiveContext } from "../cognition/sara2050Engine";
 import { AuditLog } from "../agent/audit";
 import { EpisodicTrajectoryStore } from "../cognition/episodicTrajectoryStore";
 import { AgenticEventLoop } from "../cognition/agenticEventLoop";
@@ -37,6 +38,13 @@ import { JarvisModeManager } from "../cognition/jarvisModes";
 import { AsiKernelEngine } from "../cognition/asiKernel";
 import { BiometricPresenceEngine, BehavioralPatternEngine } from "../cognition/presenceAndPatterns";
 import { JarvisGuardianSuite } from "../cognition/jarvisGuardianSuite";
+import { ExecutiveOpsEngine } from "../cognition/executiveOpsEngine";
+import { UserIntegrationManager } from "../cognition/integrationManager";
+import { CentralOperatingLayer } from "../cognition/centralOperatingLayer";
+import { WindowsBootSecurityGate } from "../cognition/windowsBootGate";
+import { FullSystemControlEngine } from "../cognition/fullSystemControlEngine";
+import { FrontierCapabilitiesEngine } from "../cognition/frontierCapabilitiesEngine";
+import { AvengersPantheonEngine } from "../cognition/avengersPantheonEngine";
 
 function makeTempDir(prefix: string): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -1213,6 +1221,610 @@ test("Local SARA-ASI Kernel, Biometric Presence (15s hysteresis + LBPH/Histogram
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("Sara2050Engine verifies Continuous Agency + A2A, Causal World Model, Proof-Carrying Decisions, Lifelong Memory + PII Anonymizer, Affective Calibration, Ed25519 Provenance & Kill-Switch", async () => {
+  const dir = makeTempDir("sara-2050-horizon-");
+  try {
+    let haltedCount = 0;
+    const gate = new FormalConstraintGate();
+    const mockGeminiRouter: any = {
+      registry: { getSelection: () => ({ planning: "gemini-2.5-flash", summarization: "gemini-2.5-flash", coding: "gemini-2.5-flash" }) },
+      generate: async () => {
+        throw new Error("Offline sandbox test — uses deterministic local edge neuromorphic path");
+      },
+    };
+    const engine = new Sara2050Engine({
+      dataDir: dir,
+      router: mockGeminiRouter,
+      constraintGate: gate,
+      onKillSwitch: () => {
+        haltedCount += 1;
+      },
+    });
+    await engine.initialize();
+
+    // 1. Continuous Multi-Horizon Agency + A2A Envelopes
+    const plan = await engine.launchContinuousGoal(
+      "Verify TypeScript workspace health and generate release checkpoint",
+      140,
+    );
+    assert.equal(plan.status, "active");
+    assert.ok(plan.horizons.immediate.length >= 1);
+    assert.ok(plan.horizons.sprint.length >= 1);
+    assert.ok(plan.horizons.longHorizon.length >= 1);
+    assert.ok(plan.a2aEnvelopes.length >= 3);
+
+    // 2. Causal & Spatial World Model Simulator
+    const simSafe = engine.simulateWorldIntervention("Run incremental TypeScript typecheck", "codebase_integrity");
+    assert.equal(simSafe.reversible, true);
+    assert.ok(simSafe.stabilityScore >= 50);
+    assert.ok(simSafe.predictedChain.length >= 1);
+
+    const simRisky = engine.simulateWorldIntervention("rm -rf /system32 force wipe", "host_compute");
+    assert.equal(simRisky.reversible, false);
+    assert.equal(simRisky.physicalOrSystemRisk, "high");
+
+    // 3. Neuro-Symbolic Proof-Carrying Decision + Ed25519 Signature
+    const decision = await engine.createProofCarryingDecision(
+      "Update local workspace index safely",
+      true,
+    );
+    assert.equal(decision.formalProof.satisfiable, true);
+    assert.equal(decision.alignmentChecks.ownerAuthorized, true);
+    assert.equal(decision.provenance.algorithm, "Ed25519");
+
+    // 4. Lifelong Local Memory Graph + Local-First PII Anonymization
+    const node = await engine.upsertMemoryNode({
+      kind: "project",
+      label: "SARA 2050 Architecture",
+      summary: "Local-first verifiable ambient desktop intelligence",
+      salience: 0.95,
+      privateLocalOnly: true,
+      relateToLabel: "Owner",
+      relation: "led_by",
+    });
+    assert.equal(node.label, "SARA 2050 Architecture");
+    const sub = engine.queryMemorySubgraph("2050", 5);
+    assert.ok(sub.nodes.some((n) => n.label === "SARA 2050 Architecture"));
+
+    const redacted = anonymizeSensitiveContext(
+      "Contact owner@example.com or +1-555-234-5678 with key AIzaSyD1234567890abcdefghijkXYZ12345 at C:\\Users\\Amol\\secret.txt",
+    );
+    assert.ok(!redacted.sanitized.includes("owner@example.com"));
+    assert.ok(!redacted.sanitized.includes("AIzaSyD"));
+    assert.ok(redacted.redactions >= 3);
+
+    // 5. Affective & Empathic Calibration
+    const stressed = engine.calibrateAffectiveState({
+      recentMessage: "URGENT!! Everything is failing right now, fix this ASAP!!",
+      backspaceRatio: 0.38,
+      windowSwitchesPerMin: 18,
+      sessionMinutes: 190,
+    });
+    assert.ok(stressed.stressIndex >= 55);
+    assert.equal(stressed.pacing, "concise_calm");
+
+    // 6. Ed25519 Cryptographic Provenance Sign + Verify + Tamper Rejection
+    const cert = engine.signProvenance("sara.test.artifact", "verified-payload-v1");
+    assert.equal(engine.verifyProvenance(cert, "verified-payload-v1").valid, true);
+    assert.equal(engine.verifyProvenance(cert, "tampered-payload-v2").valid, false);
+
+    // 7. Instant Global Alignment Kill-Switch & Reset
+    await engine.engageGlobalKillSwitch("Unit test emergency halt");
+    assert.equal(engine.status().killSwitchActive, true);
+    assert.equal(haltedCount, 1);
+    await assert.rejects(
+      () => engine.launchContinuousGoal("Should be blocked while kill-switch is active", 50),
+      /Kill-Switch/i,
+    );
+
+    await engine.resetGlobalKillSwitch("Unit test resume");
+    assert.equal(engine.status().killSwitchActive, false);
+    assert.ok(engine.getSustainabilityMetrics().localEdgeFastCalls >= 1);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("SARA Dual On-Demand Modes keep J.A.R.V.I.S. and Ultron OFF by default and sync persona, voice, and UI surface", async () => {
+  const dir = makeTempDir("sara-dual-modes-");
+  try {
+    assert.equal(DEFAULT_APP_SETTINGS.personas.activeMode, "sara");
+    assert.equal(DEFAULT_APP_SETTINGS.personas.jarvisActive, false);
+    assert.equal(DEFAULT_APP_SETTINGS.personas.ultronActive, false);
+    assert.equal(DEFAULT_APP_SETTINGS.personas.saraVoiceName, "Aoede");
+    assert.equal(DEFAULT_APP_SETTINGS.personas.jarvisVoiceName, "Charon");
+    assert.equal(DEFAULT_APP_SETTINGS.personas.ultronVoiceName, "Fenrir");
+
+    const store = new AppSettingsStore(dir);
+    await store.initialize();
+    assert.equal(store.get().personas.activeMode, "sara");
+
+    const jarvisOn = await store.update({
+      jarvis: { surfaceMode: "live_core" },
+      personas: { activeMode: "jarvis", jarvisActive: true, ultronActive: false },
+    });
+    assert.equal(jarvisOn.jarvis.surfaceMode, "live_core");
+    assert.equal(jarvisOn.personas.activeMode, "jarvis");
+    assert.equal(jarvisOn.personas.jarvisActive, true);
+    assert.equal(jarvisOn.personas.ultronActive, false);
+
+    const ultronOn = await store.update({
+      jarvis: { surfaceMode: "ultron" },
+      personas: { activeMode: "ultron", jarvisActive: false, ultronActive: true },
+    });
+    assert.equal(ultronOn.jarvis.surfaceMode, "ultron");
+    assert.equal(ultronOn.personas.activeMode, "ultron");
+    assert.equal(ultronOn.personas.ultronActive, true);
+
+    const backToSara = await store.update({
+      jarvis: { surfaceMode: "companion" },
+      personas: { activeMode: "sara", jarvisActive: false, ultronActive: false },
+    });
+    assert.equal(backToSara.jarvis.surfaceMode, "companion");
+    assert.equal(backToSara.personas.activeMode, "sara");
+    assert.equal(backToSara.personas.jarvisActive, false);
+    assert.equal(backToSara.personas.ultronActive, false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("ExecutiveOpsEngine powers local Ledger, CRM/AttendEasy Approval Queue, 4-Agent Boardroom, Smart Room IoT, and Proactive Interrupts", async () => {
+  const dir = makeTempDir("sara-exec-ops-");
+  try {
+    const ops = new ExecutiveOpsEngine({ dataDir: dir });
+    await ops.initialize();
+
+    // 1. Voice Bookkeeping & Expense Logger
+    const expense = ops.logFromNaturalUtterance("Log ₹1,200 for server hosting");
+    assert.equal(expense.entry.kind, "expense");
+    assert.equal(expense.entry.amount, 1200);
+
+    const revenue = ops.logLedgerEntry({
+      kind: "income",
+      amount: 45000,
+      currency: "INR",
+      category: "SaaS Subscription",
+      description: "AttendEasy campus deployment",
+    });
+    assert.equal(revenue.entry.amount, 45000);
+    assert.equal(ops.getLedgerSummary().netCashFlowInr, 43800);
+
+    // 2. Client & CRM Autopilot + Proposal Approval Queue
+    const crmRes = await ops.upsertCrmDealAndDraftProposal({
+      clientOrProject: "AttendEasy Enterprise",
+      contactName: "Dean Academic",
+      quotedValueInr: 120000,
+      autoDraftProposal: true,
+    });
+    assert.ok(crmRes.queuedApproval);
+    assert.equal(crmRes.queuedApproval.status, "pending");
+    assert.ok(ops.status().pendingApprovals.some((a) => a.id === crmRes.queuedApproval!.id));
+
+    const approved = ops.resolveApproval(crmRes.queuedApproval.id, true);
+    assert.equal(approved.status, "approved");
+
+    // 3. 4-Agent Boardroom Debate + Market Intelligence Brief
+    const debate = await ops.conveneBoardroom("Should we expand AttendEasy enterprise tier?");
+    assert.equal(debate.opinions.length, 4);
+    assert.ok(debate.executiveSynthesis.length > 10);
+
+    const brief = await ops.runResearchBrief("EdTech attendance automation India");
+    assert.ok(brief.headline.length > 5);
+
+    // 4. Voice Workspace Switching + Smart Room Lockdown + Concierge
+    const ws = ops.switchWorkspaceContext("AttendEasy");
+    assert.equal(ws.activeWorkspaceContext, "AttendEasy");
+
+    const iot = await ops.triggerSmartRoomCommand("lock down workspace");
+    assert.ok(iot.devices.length >= 1);
+
+    const concierge = ops.addConciergeItem({
+      category: "bill_reminder",
+      title: "Cloud GPU invoice",
+      scheduledFor: "Friday 5 PM",
+      estimatedCostInr: 4200,
+    });
+    assert.ok(concierge.approval);
+    assert.equal(concierge.approval.status, "pending");
+
+    // 5. Morning Briefing + Interrupt-Driven Proactive Awareness
+    const morning = ops.generateMorningExecutiveBriefing({ pendingTasksCount: 2, upcomingReminders: ["Standup"] });
+    assert.ok(morning.spokenBriefing.length > 15);
+
+    const alert = ops.evaluateProactiveInterrupts({ failedTaskGoal: "Nightly build pipeline" });
+    assert.ok(alert);
+    assert.equal(alert.severity, "warning");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("UserIntegrationManager persists, tests, invokes, toggles, and deletes local integrations cleanly", async () => {
+  const dir = makeTempDir("sara-integrations-");
+  try {
+    const docsDir = path.join(dir, "shared-docs");
+    fs.mkdirSync(docsDir, { recursive: true });
+    fs.writeFileSync(path.join(docsDir, "roadmap.md"), "# SARA Roadmap\n", "utf8");
+
+    const mgr = new UserIntegrationManager(dir);
+    await mgr.initialize();
+
+    const created = mgr.upsert({
+      name: "Team Shared Docs",
+      category: "documents",
+      endpointOrPath: docsDir,
+    });
+    assert.equal(created.enabled, true);
+
+    const testRes = await mgr.testConnection(created.id);
+    assert.equal(testRes.status, "connected");
+    assert.match(testRes.lastTestDetail, /1 item/);
+
+    const invokeRes = await mgr.invoke(created.id);
+    assert.equal(invokeRes.ok, true);
+    assert.match(invokeRes.preview, /roadmap\.md/);
+
+    const toggled = mgr.setEnabled(created.id, false);
+    assert.equal(toggled.enabled, false);
+
+    const deleted = mgr.remove(created.id);
+    assert.equal(deleted, true);
+    assert.equal(mgr.list().length, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("WindowsBootSecurityGate enforces 3-Factor (Face + Voice + Password) Grant/Deny for Windows Boot without locking SARA capabilities", async () => {
+  const dir = makeTempDir("sara-boot-gate-");
+  try {
+    const gate = new WindowsBootSecurityGate(dir);
+    await gate.initialize();
+
+    assert.equal(gate.status().zeroCapabilityLock, true);
+
+    // Engage Windows Pre-Desktop Security Gate
+    gate.engageBootLock("Windows 10 Pro boot sequence");
+    assert.equal(gate.status().gateLocked, true);
+
+    // Enroll Face + Voice + Password
+    const ownerFace = Array.from({ length: 32 }, (_, i) => Number((0.4 + 0.3 * Math.sin(i * 0.4)).toFixed(4)));
+    gate.enrollFaceDescriptor(ownerFace);
+    gate.enrollVoicePassphrase("sara authorize access");
+    gate.enrollPassword("win10stark");
+
+    // Wrong password -> ACCESS DENIED
+    const badPwd = gate.verifyPassword("wrong-secret");
+    assert.equal(badPwd.matched, false);
+    assert.equal(badPwd.granted, false);
+    assert.equal(badPwd.status.decisionState, "access_denied");
+
+    // Wrong face -> ACCESS DENIED
+    const strangerFace = Array.from({ length: 32 }, (_, i) => (i % 2 === 0 ? -0.9 : 0.9));
+    const badFace = gate.verifyFace(strangerFace);
+    assert.equal(badFace.matched, false);
+    assert.equal(badFace.granted, false);
+
+    // Valid Face + Valid Voice -> ACCESS GRANTED + Welcome Greeting!
+    const okFace = gate.verifyFace(ownerFace);
+    assert.equal(okFace.matched, true);
+    assert.equal(okFace.granted, false); // Needs Voice too under default policy
+
+    const okVoice = gate.verifyVoice("Hey SARA authorize access right now");
+    assert.equal(okVoice.matched, true);
+    assert.equal(okVoice.granted, true);
+    assert.equal(okVoice.status.gateLocked, false);
+    assert.equal(okVoice.status.decisionState, "access_granted");
+    assert.match(okVoice.welcomeSpeech, /Identity confirmed/i);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CentralOperatingLayer executes Windows 10 Pro Host actions, protects OS processes, mounts Wallpaper, and routes Spoke Hardware Nodes", async () => {
+  const dir = makeTempDir("sara-central-os-");
+  try {
+    let lockTriggered = false;
+    const col = new CentralOperatingLayer({
+      dataDir: dir,
+      onLockEngage: () => {
+        lockTriggered = true;
+      },
+    });
+    await col.initialize();
+
+    assert.equal(col.status().zeroCapabilityAuthLock, true);
+
+    // 1. Host i5 / 8 GB System Health
+    const healthOut = await col.dispatchIntent("Check my RAM usage and CPU health");
+    assert.equal(healthOut.executedActions[0].command, "system_health");
+    assert.ok(typeof healthOut.executedActions[0].result.ramPercent === "number");
+
+    // 2. Protected Windows process guard (`explorer.exe` cannot be killed)
+    const blockedKill = await col.executeOnNode("win10_pc", "kill_process", { process_name: "explorer.exe" });
+    assert.match(String(blockedKill.error), /Protected Windows system process/i);
+
+    // 3. Live Desktop Wallpaper (`WorkerW`) toggle
+    const wp = await col.dispatchIntent("Embed wallpaper");
+    assert.equal(wp.executedActions[0].command, "wallpaper_mode");
+    assert.equal(col.status().wallpaperEmbedded, true);
+
+    // 4. Spoke Hardware Node (`esp32_lab`) registration + async EXECUTE -> RESULT round-trip
+    col.attachSpokeSocket("esp32_lab", "iot", {
+      sendJson: (payload) => {
+        if (payload.type === "EXECUTE") {
+          setImmediate(() => {
+            col.handleSpokeMessage("esp32_lab", {
+              type: "RESULT",
+              req_id: payload.req_id,
+              data: { relay: "ON", voltage: 3.3 },
+            });
+          });
+        }
+      },
+    });
+    col.handleSpokeMessage("esp32_lab", {
+      type: "REGISTER",
+      capabilities: ["workbench_power"],
+    });
+
+    const spokeRes = await col.dispatchIntent("node esp32_lab: workbench_power");
+    assert.equal(spokeRes.executedActions[0].nodeId, "esp32_lab");
+    assert.equal(spokeRes.executedActions[0].result.relay, "ON");
+
+    // 5. Workstation Lock triggers Boot Security Gate
+    await col.dispatchIntent("Lock PC");
+    assert.equal(lockTriggered, true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("FullSystemControlEngine cascades 3-Layer Control, completes 'play arjit song' without questions, and practices Python skills in isolated sandbox", async () => {
+  const dir = makeTempDir("sara-full-control-");
+  try {
+    const engine = new FullSystemControlEngine({
+      dataDir: dir,
+      callAgent: async (method, params) => {
+        if (method === "uiaClick" && params?.name === "SaveSettingsBtn") {
+          return { ok: true, result: { clicked: "SaveSettingsBtn" } };
+        }
+        if (method === "click") {
+          return { ok: true, result: { x: params?.x, y: params?.y } };
+        }
+        return { ok: false };
+      },
+    });
+
+    // 1. Layer 1 Instant Shell Execution
+    const l1 = await engine.executeThreeLayerControl({
+      goal: "Echo quick Layer 1 verification",
+      preferredLayer: "layer1_shell",
+      shellCommand: "echo LAYER1_INSTANT_OK",
+    });
+    assert.equal(l1.layerUsed, "layer1_shell");
+    assert.equal(l1.verification.verified, true);
+    assert.match(l1.output, /LAYER1_INSTANT_OK/);
+
+    // 2. Layer 2 Windows UI Automation Tree
+    const l2 = await engine.executeThreeLayerControl({
+      goal: "Click SaveSettingsBtn via UIA",
+      preferredLayer: "layer2_uia",
+      uiaTarget: { windowTitle: "Settings", controlName: "SaveSettingsBtn", action: "click" },
+    });
+    assert.equal(l2.layerUsed, "layer2_uia");
+    assert.equal(l2.verification.verified, true);
+
+    // 3. Layer 3 Vision See -> Think -> Act -> Verify
+    const l3 = await engine.executeThreeLayerControl({
+      goal: "Click visual icon on canvas",
+      preferredLayer: "layer3_vision",
+      visionCoordinates: { xNorm: 0.4, yNorm: 0.6 },
+    });
+    assert.equal(l3.layerUsed, "layer3_vision");
+    assert.equal(l3.verification.method, "vision_frame_diff");
+
+    // 4. Smart Half-Task Completer ("play arjit song") — NEVER asks "Which app? Which song?"
+    const music = await engine.completeHalfTask("play arjit song", { autoOpenBrowser: false });
+    assert.equal(music.askedClarifyingQuestion, false);
+    assert.equal(music.category, "music_media");
+    assert.doesNotMatch(music.spokenConfirmation, /which app|which song/i);
+    assert.ok(music.proactiveSuggestion.length > 5);
+
+    const work = await engine.completeHalfTask("start my work", { autoOpenBrowser: false });
+    assert.equal(work.askedClarifyingQuestion, false);
+    assert.equal(work.category, "project_workspace");
+
+    // 5. Voyager + Reflexion Autonomous Sandbox Skill Trainer & Dynamic Python Runner
+    const trained = await engine.studyAndPracticeSkill("token_frequency_analyzer");
+    assert.equal(trained.mastered, true);
+    assert.ok(trained.skill?.skillName.includes("token_frequency_analyzer"));
+
+    const executed = await engine.runOrLearnSkill(trained.skill!.skillName, {
+      text: "sara autonomous sandbox practice passed",
+    });
+    assert.equal(executed.ok, true);
+    assert.equal((executed.output as any)?.word_count, 5);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("FrontierCapabilitiesEngine powers Ghost Worker, Screen Memory, Ghost Clipboard, Ephemeral UI, Boardroom, Time-Travel & .sara Soul Capsule", async () => {
+  const dir = makeTempDir("sara-frontier-");
+  try {
+    const frontier = new FrontierCapabilitiesEngine({ dataDir: dir });
+
+    // 1. Ghost Worker + Morning Diff Report
+    frontier.enqueueGhostJob({ title: "Nightly Vault Backup", kind: "config_backup", targetOrPrompt: "SARA" });
+    const diff = await frontier.runPendingGhostJobs();
+    assert.equal(diff.completedCount, 1);
+    assert.match(diff.morningDiffReport, /Nightly Vault Backup/);
+
+    // 2. Photographic Screen Memory (<2 MB)
+    frontier.recordScreenMemory({
+      windowTitle: "AttendEasy - Database Schema",
+      appName: "VS Code",
+      extractedText: "CREATE TABLE students_attendance (id TEXT PRIMARY KEY)",
+    });
+    const recalled = frontier.recallScreenMemory("students_attendance");
+    assert.equal(recalled.length, 1);
+    assert.match(recalled[0].windowTitle, /AttendEasy/);
+
+    // 3. Ghost Clipboard Semantic Pipe & Ephemeral Zero-App Widget
+    const clip = await frontier.transformClipboard('{"user":"amol","active":true}', "to_typescript");
+    assert.match(clip.output, /interface|type|boolean/i);
+
+    const widget = await frontier.generateEphemeralWidget("Sprint countdown timer");
+    assert.match(widget.html, /<!DOCTYPE html>|<div/i);
+
+    // 4. Multi-Agent Synthetic Boardroom + Devil's Advocate
+    const board = await frontier.runSyntheticBoardroom("Should we keep SQLite WAL locally?");
+    assert.equal(board.panel.length, 4);
+    assert.match(board.devilsAdvocateChallenge, /Devil's Advocate/i);
+
+    // 5. Duress Honey-Token Decoy + Budget Guard + Time-Travel File Snapshot/Undo
+    const duress = frontier.evaluateDuressOrIntruder({ spokenOrTypedPhrase: "open archive protocol zero" });
+    assert.equal(duress.decoyActivated, true);
+    frontier.evaluateDuressOrIntruder({ resetDecoy: true });
+
+    const sampleFile = path.join(dir, "draft.txt");
+    fs.writeFileSync(sampleFile, "v1-clean-code", "utf8");
+    const snap = frontier.createTimeTravelSnapshot(sampleFile, "Before risky edit");
+    fs.writeFileSync(sampleFile, "v2-broken-code", "utf8");
+    frontier.restoreTimeTravelSnapshot(snap.snapshotId);
+    assert.equal(fs.readFileSync(sampleFile, "utf8"), "v1-clean-code");
+
+    const budgetBlocked = frontier.evaluateBudgetGuard({
+      merchant: "GPU Cloud",
+      amountInr: 4000,
+      monthlyCapInr: 2500,
+      spentSoFarInr: 500,
+    });
+    assert.equal(budgetBlocked.approved, false);
+
+    // 6. AES-256-GCM .sara Soul Capsule export & import round-trip
+    const exported = frontier.exportSoulCapsule("my-vault-pass-2026");
+    assert.ok(exported.bytes > 40);
+    const imported = frontier.importSoulCapsule(exported.encryptedBase64, "my-vault-pass-2026");
+    assert.ok(imported.restoredMacros >= 1);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("AvengersPantheonEngine verifies all 12 MCU capabilities: V.I.S.I.O.N. Triad + Phasing Zero-Trace + Mind-Stone Nexus, Stark 3D Blueprint + Hand Gestures + Forensic Scrubber, E.D.I.T.H. AR + Abort Rollback, F.R.I.D.A.Y. Fight Pattern + Suit Reroute, G.R.I.O.T. Cockpit, VERONICA & K.A.R.E.N.", async () => {
+  const dir = makeTempDir("sara-avengers-pantheon-");
+  try {
+    let phaseSignal: { enabled: boolean; opacity: number } | null = null;
+    const pantheon = new AvengersPantheonEngine({
+      dataDir: dir,
+      onElectronPhaseToggle: (p) => {
+        phaseSignal = p;
+      },
+    });
+
+    // 1. V.I.S.I.O.N. Triad Synthesis (J.A.R.V.I.S. + Ultron + Mind Stone)
+    const triad = await pantheon.synthesizeVisionTriad("Unify cloud Gemini reasoning with 8 GB RAM local OS control");
+    assert.ok(triad.jarvisPerspective.stance.length > 10);
+    assert.ok(triad.ultronPerspective.stance.length > 10);
+    assert.equal(triad.visionSynthesis.ethicalAlignmentScore, 98);
+
+    // 2. V.I.S.I.O.N. Phasing Mode + Zero-Trace Scratchpad Shredding
+    const phased = pantheon.setPhaseMode({ enabled: true, opacity: 0.5, zeroTrace: true });
+    assert.equal(phased.enabled, true);
+    assert.equal(phased.clickThrough, true);
+    assert.deepEqual(phaseSignal, { enabled: true, opacity: 0.5 });
+
+    const scratch = pantheon.writeZeroTraceScratch("ghost.txt", "ephemeral-secret");
+    assert.equal(fs.existsSync(scratch.ephemeralPath), true);
+    pantheon.setPhaseMode({ enabled: false });
+    assert.equal(fs.existsSync(scratch.ephemeralPath), false);
+
+    // 3. Mind-Stone Global Threat & CVE Nexus correlates against real SARA package.json
+    const nexus = await pantheon.correlateMindStoneNexus();
+    assert.ok(nexus.scannedProjects.some((p) => p.name === "SARA"));
+    assert.ok(nexus.correlations.length >= 1);
+
+    // 4 & 5. Mid-Air Hand Gesture Router + Stark 3D Explodable Hardware Blueprint
+    const gest = pantheon.recordHandGesture({ gesture: "fist_grab", xNorm: 0.5, yNorm: 0.5 });
+    assert.equal(gest.mappedCommand, "toggle_explode_wireframe");
+
+    const bp3d = await pantheon.generateStark3dBlueprint("Design an ESP32 smart door lock with relay and power supply");
+    assert.ok(bp3d.components.length >= 4);
+    assert.ok(bp3d.totalEstimatedBomInr > 500);
+    assert.match(bp3d.firmwareCode, /RELAY_PIN/);
+
+    // 6. Iron Man 3 Forensic Timeline Scrubber
+    pantheon.recordForensicEvent({
+      source: "terminal_error",
+      severity: "critical",
+      title: "Root Cause Crash Marker",
+      detail: "Null pointer in test fixture",
+    });
+    const timeline = await pantheon.buildForensicTimeline(120);
+    assert.equal(timeline.rootCauseInflection?.title, "Root Cause Crash Marker");
+
+    // 7 & 8. E.D.I.T.H. AR Lens + Multi-Target Tactical Batch + Instant "Abort! Abort!" Rollback
+    const ar = await pantheon.analyzeEdithFrame({ operatorQuery: "Inspect ESP32 board" });
+    assert.equal(ar.hudMode, "EDITH_TACTICAL_LENS");
+    assert.ok(ar.targets.length >= 1);
+
+    const existingFile = path.join(dir, "existing.cfg");
+    const newFile = path.join(dir, "created-by-batch.cfg");
+    fs.writeFileSync(existingFile, "ORIGINAL_SAFE_CONFIG", "utf8");
+
+    const batch = pantheon.stageEdithTacticalBatch("Risky Multi-File Batch", [
+      { kind: "write_file", targetPath: existingFile, content: "MUTATED_CONFIG" },
+      { kind: "write_file", targetPath: newFile, content: "TEMP_BATCH_ARTIFACT" },
+    ]);
+    await pantheon.executeEdithTacticalBatch(batch.batchId);
+    assert.equal(fs.readFileSync(existingFile, "utf8"), "MUTATED_CONFIG");
+    assert.equal(fs.existsSync(newFile), true);
+
+    const rolledBack = pantheon.abortAndRollbackBatch(batch.batchId);
+    assert.equal(rolledBack.restoredFilesCount, 1);
+    assert.equal(rolledBack.removedNewFilesCount, 1);
+    assert.equal(fs.readFileSync(existingFile, "utf8"), "ORIGINAL_SAFE_CONFIG");
+    assert.equal(fs.existsSync(newFile), false);
+
+    // 9 & 10. F.R.I.D.A.Y. Fight-Pattern Counter + Suit Damage Self-Reroute Map
+    const strategy = await pantheon.analyzeFridayFightPattern({
+      category: "compiler_loop",
+      history: ["TS2345 type mismatch", "TS2339 property missing"],
+    });
+    assert.match(strategy.counterMove, /Counter-Move/i);
+
+    const reroutedSuit = pantheon.inspectSuitSubsystemsAndReroute({ simulateFaultIn: "gemini_cloud_brain" });
+    assert.ok(reroutedSuit.organs.find((o) => o.organId === "gemini_cloud_brain")?.rerouteEngaged);
+    pantheon.inspectSuitSubsystemsAndReroute({ simulateFaultIn: "clear" });
+
+    // 11. G.R.I.O.T. Remote Piloting Cockpit
+    const cockpit = await pantheon.getGriotCockpitTelemetry();
+    assert.match(cockpit.viewportSvgDataUrl, /^data:image\/svg\+xml;base64,/);
+    const remoteTap = await pantheon.dispatchGriotRemoteInput({ action: "tap", xNorm: 0.35, yNorm: 0.65 });
+    assert.equal(remoteTap.ok, true);
+
+    // 12. VERONICA Encrypted Drop-Pod + K.A.R.E.N. Recon Drone
+    const skillsDir = path.join(dir, "learned_skills");
+    fs.mkdirSync(skillsDir, { recursive: true });
+    fs.writeFileSync(path.join(skillsDir, "skill_demo.py"), "def execute(**kw):\n    return 'ok'\n", "utf8");
+    pantheon.deployKarenReconDrone({ name: "Exam Result Watcher", targetUrl: "https://github.com" });
+
+    const pod = pantheon.deployVeronicaDropPod("stark-veronica-secret");
+    assert.equal(pod.includedLearnedSkills, 1);
+    fs.rmSync(path.join(skillsDir, "skill_demo.py"), { force: true });
+
+    const restoredPod = pantheon.restoreVeronicaDropPod(pod.encryptedBase64, "stark-veronica-secret");
+    assert.equal(restoredPod.restoredSkillsCount, 1);
+    assert.equal(fs.existsSync(path.join(skillsDir, "skill_demo.py")), true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 
 
 

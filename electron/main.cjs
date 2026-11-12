@@ -754,7 +754,7 @@ function openLiveCoreWindow() {
     show: false,
     backgroundColor: '#03050a',
     autoHideMenuBar: true,
-    title: 'SARA — J.A.R.V.I.S. Core UI',
+    title: 'SARA — Live Core UI',
     icon: APP_ICON,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -1094,12 +1094,10 @@ function applyShellSettings(settings) {
       console.warn('[shell] invalid lockdown shortcut:', error && error.message);
     }
   }
-  // Sync optional JARVIS Live Core surface if selected on Windows.
-  if (process.platform === 'win32' && settings.jarvis?.surfaceMode === 'live_core' && liveCoreSurfaceExecutable()) {
-    if (!liveCoreSurfaceProcess || liveCoreSurfaceProcess.exitCode !== null) {
-      toggleLiveCoreSurface();
-    }
-  }
+  // Note: When surfaceMode === 'live_core' or 'sara_os', RootSurfaceRouter in
+  // mainWindow renders that UI directly. Do not auto-spawn a duplicate external
+  // SaraLiveCoreHost.exe overlay on top of mainWindow (users can still toggle
+  // the optional desktop wallpaper overlay manually from the system tray).
   updateTrayMenu();
 }
 
@@ -1338,6 +1336,64 @@ function startShell() {
     if (!win) return { ok: false, maximized: false, alwaysOnTop: false };
     return { ok: true, maximized: win.isMaximized(), alwaysOnTop: win.isAlwaysOnTop() };
   });
+
+  let wallpaperEmbedded = false;
+  ipcMain.removeHandler('wallpaper:set-enabled');
+  ipcMain.handle('wallpaper:set-enabled', (event, enabled) => {
+    const win = resolveTrustedWindow(event) || mainWindow;
+    if (!win) return { ok: false, enabled: false };
+    const want = Boolean(enabled);
+    if (want) {
+      const ok = win32.embedWindowAsWallpaper ? win32.embedWindowAsWallpaper(win) : false;
+      wallpaperEmbedded = ok || want;
+      return { ok: true, nativeMounted: ok, enabled: wallpaperEmbedded };
+    } else {
+      const ok = win32.detachWindowFromWallpaper ? win32.detachWindowFromWallpaper(win) : false;
+      wallpaperEmbedded = false;
+      return { ok: true, nativeMounted: ok, enabled: false };
+    }
+  });
+  ipcMain.removeHandler('wallpaper:get-status');
+  ipcMain.handle('wallpaper:get-status', () => ({
+    supported: process.platform === 'win32',
+    enabled: wallpaperEmbedded,
+  }));
+
+  ipcMain.removeHandler('vision:set-phase');
+  ipcMain.handle('vision:set-phase', (event, payload) => {
+    const win = resolveTrustedWindow(event) || mainWindow;
+    return applyVisionPhaseModeToWindow(win, Boolean(payload?.enabled), Number(payload?.opacity ?? 0.5));
+  });
+}
+
+function applyVisionPhaseModeToWindow(win, enabled, opacity = 0.5) {
+  if (!win || win.isDestroyed?.()) return { ok: false, enabled: false };
+  const clamped = enabled ? Math.max(0.25, Math.min(0.85, Number(opacity) || 0.5)) : 1.0;
+  try {
+    win.setOpacity(clamped);
+    win.setIgnoreMouseEvents(Boolean(enabled), enabled ? { forward: true } : undefined);
+    win.setAlwaysOnTop(Boolean(enabled), enabled ? 'screen-saver' : 'normal');
+    const nativeApplied = win32.setWindowPhaseMode ? win32.setWindowPhaseMode(win, Boolean(enabled), clamped) : false;
+    if (enabled) {
+      try {
+        globalShortcut.register('Alt+Shift+P', () => {
+          applyVisionPhaseModeToWindow(mainWindow, false, 1.0);
+          void backendRequest('POST', '/api/avengers/vision/phase', { enabled: false });
+        });
+      } catch {
+        // Ignore shortcut conflict
+      }
+    } else {
+      try {
+        globalShortcut.unregister('Alt+Shift+P');
+      } catch {
+        // Ignore
+      }
+    }
+    return { ok: true, enabled: Boolean(enabled), opacity: clamped, nativeApplied };
+  } catch (err) {
+    return { ok: false, enabled: false, error: err && err.message };
+  }
 }
 
 /** Physical vs synthetic input, aggregated before it reaches the backend. */
@@ -1370,6 +1426,9 @@ function handleRuntimeMessage(message) {
       break;
     case 'runtime:companion':
       companion?.handleCommand(String(message.command || ''));
+      break;
+    case 'runtime:phase':
+      applyVisionPhaseModeToWindow(mainWindow, Boolean(message.enabled), Number(message.opacity ?? 0.5));
       break;
     case 'runtime:notify':
       if (Notification.isSupported()) {

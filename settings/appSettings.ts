@@ -44,8 +44,8 @@ export interface AppSettings {
     multiMethodFallback: boolean;
     /** Automatically execute pending GoalManager missions without manual Start clicks. */
     autoExecuteGoals: boolean;
-    /** Desktop UI surface mode ("companion" = classic SARA companion, "live_core" = assets/core ui JARVIS Live Core, "sara_os" = 4-Theme Morphing SARA OS). */
-    surfaceMode: "companion" | "live_core" | "sara_os";
+    /** Desktop UI surface mode ("companion" = classic SARA girl UI, "live_core" = JARVIS Core UI, "ultron" = Ultron UI, "vision" = V.I.S.I.O.N. Mind-Stone UI, "sara_os" = Spatial 2050 HUD, "central_os" = Windows 10 Live Wallpaper Central Operating Layer). */
+    surfaceMode: "companion" | "live_core" | "ultron" | "vision" | "sara_os" | "central_os";
     /** Enable SARA's independent Security Shield for unauthorized-access protection. */
     shieldEnabled: boolean;
     /** Force owner PIN/passphrase enrollment before allowing any PC-control or chat actions. */
@@ -166,6 +166,19 @@ export interface AppSettings {
     debugView: boolean;
     physicsDebug: boolean;
     verboseLogs: boolean;
+  };
+  /** SARA / J.A.R.V.I.S. / ULTRON / V.I.S.I.O.N. / F.R.I.D.A.Y. multi-persona & separate voice state (all Avengers modes stay OFF until activated). */
+  personas: {
+    activeMode: "sara" | "jarvis" | "ultron" | "vision" | "friday";
+    jarvisActive: boolean;
+    ultronActive: boolean;
+    visionActive: boolean;
+    fridayActive: boolean;
+    saraVoiceName: string;
+    jarvisVoiceName: string;
+    ultronVoiceName: string;
+    visionVoiceName: string;
+    fridayVoiceName: string;
   };
   /** Additive advanced modules. All are opt-in; existing core behavior is unchanged. */
   advancedFeatures: {
@@ -298,6 +311,18 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     physicsDebug: false,
     verboseLogs: false,
   },
+  personas: {
+    activeMode: "sara",
+    jarvisActive: false,
+    ultronActive: false,
+    visionActive: false,
+    fridayActive: false,
+    saraVoiceName: "Aoede",
+    jarvisVoiceName: "Charon",
+    ultronVoiceName: "Fenrir",
+    visionVoiceName: "Orus",
+    fridayVoiceName: "Kore",
+  },
   advancedFeatures: {
     adaptiveTone: false,
     skillAcquisition: false,
@@ -320,7 +345,7 @@ const bool = (value: unknown, fallback: boolean) => (typeof value === "boolean" 
 export function normalizeSettings(input: unknown, base: AppSettings = DEFAULT_APP_SETTINGS): AppSettings {
   const raw = (input && typeof input === "object" ? input : {}) as Record<string, any>;
   const d = base;
-  const b = raw.behavior || {}, a = raw.autonomy || {}, j = raw.jarvis || {}, u = raw.ultron || {}, h = raw.humanLike || {}, v = raw.voice || {}, c = raw.companion || {}, dh = raw.desktopHost || {}, ch = raw.character || {}, p = raw.physics || {}, pr = raw.privacy || {}, sec = raw.security || {}, pe = raw.performance || {}, dev = raw.developer || {}, gr = raw.graphics || {}, af = raw.advancedFeatures || {};
+  const b = raw.behavior || {}, a = raw.autonomy || {}, j = raw.jarvis || {}, u = raw.ultron || {}, h = raw.humanLike || {}, v = raw.voice || {}, c = raw.companion || {}, dh = raw.desktopHost || {}, ch = raw.character || {}, p = raw.physics || {}, pr = raw.privacy || {}, sec = raw.security || {}, pe = raw.performance || {}, dev = raw.developer || {}, gr = raw.graphics || {}, per = raw.personas || {}, af = raw.advancedFeatures || {};
   return {
     version: 3,
     onboardingComplete: bool(raw.onboardingComplete, d.onboardingComplete),
@@ -348,7 +373,7 @@ export function normalizeSettings(input: unknown, base: AppSettings = DEFAULT_AP
       proactiveJarvis: bool(j.proactiveJarvis, d.jarvis.proactiveJarvis),
       multiMethodFallback: bool(j.multiMethodFallback, d.jarvis.multiMethodFallback),
       autoExecuteGoals: bool(j.autoExecuteGoals, d.jarvis.autoExecuteGoals),
-      surfaceMode: oneOf(j.surfaceMode, ["companion", "live_core", "sara_os"] as const, d.jarvis.surfaceMode),
+      surfaceMode: oneOf(j.surfaceMode, ["companion", "live_core", "ultron", "vision", "sara_os", "central_os"] as const, d.jarvis.surfaceMode),
       shieldEnabled: bool(j.shieldEnabled, d.jarvis.shieldEnabled),
       requireEnrollmentBeforeUse: bool(j.requireEnrollmentBeforeUse, d.jarvis.requireEnrollmentBeforeUse),
       independentGuard: bool(j.independentGuard, d.jarvis.independentGuard),
@@ -452,6 +477,18 @@ export function normalizeSettings(input: unknown, base: AppSettings = DEFAULT_AP
       debugView: bool(dev.debugView, d.developer.debugView),
       physicsDebug: bool(dev.physicsDebug, d.developer.physicsDebug),
       verboseLogs: bool(dev.verboseLogs, d.developer.verboseLogs),
+    },
+    personas: {
+      activeMode: oneOf(per.activeMode, ["sara", "jarvis", "ultron", "vision", "friday"] as const, d.personas.activeMode),
+      jarvisActive: bool(per.jarvisActive, d.personas.jarvisActive),
+      ultronActive: bool(per.ultronActive, d.personas.ultronActive),
+      visionActive: bool(per.visionActive, d.personas.visionActive),
+      fridayActive: bool(per.fridayActive, d.personas.fridayActive),
+      saraVoiceName: typeof per.saraVoiceName === "string" && /^[A-Za-z]{2,24}$/.test(per.saraVoiceName) ? per.saraVoiceName : d.personas.saraVoiceName,
+      jarvisVoiceName: typeof per.jarvisVoiceName === "string" && /^[A-Za-z]{2,24}$/.test(per.jarvisVoiceName) ? per.jarvisVoiceName : d.personas.jarvisVoiceName,
+      ultronVoiceName: typeof per.ultronVoiceName === "string" && /^[A-Za-z]{2,24}$/.test(per.ultronVoiceName) ? per.ultronVoiceName : d.personas.ultronVoiceName,
+      visionVoiceName: typeof per.visionVoiceName === "string" && /^[A-Za-z]{2,24}$/.test(per.visionVoiceName) ? per.visionVoiceName : d.personas.visionVoiceName,
+      fridayVoiceName: typeof per.fridayVoiceName === "string" && /^[A-Za-z]{2,24}$/.test(per.fridayVoiceName) ? per.fridayVoiceName : d.personas.fridayVoiceName,
     },
     advancedFeatures: {
       adaptiveTone: bool(af.adaptiveTone, d.advancedFeatures.adaptiveTone),

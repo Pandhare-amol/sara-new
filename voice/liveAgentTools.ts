@@ -350,7 +350,7 @@ export const LIVE_AGENT_TOOL_DECLARATIONS = [
   },
   {
     name: "saraAsiAndGuardian",
-    description: "Run SARA-ASI Local Kernel & J.A.R.V.I.S. Guardian capabilities: execute an Observe->Prove->Red/Blue->Act cycle ('kernel_cycle'), evaluate command risk/pushback ('deference_check'), prototype & self-test a micro-app in Mark II Simulation Lab ('lab_build'), deploy House Party parallel suit fleet ('house_party'), or synthesize return-to-desk briefing ('return_briefing').",
+    description: "Run SARA's Local Orchestration Kernel & Guardian capabilities: execute an Observe->Prove->Red/Blue->Act cycle ('kernel_cycle'), evaluate command risk/pushback ('deference_check'), prototype & self-test a micro-app in SARA Simulation Lab ('lab_build'), deploy parallel sub-agent fleet ('house_party'), or synthesize return-to-desk briefing ('return_briefing').",
     parameters: {
       type: Type.OBJECT,
       properties: {
@@ -359,6 +359,179 @@ export const LIVE_AGENT_TOOL_DECLARATIONS = [
         name: { type: Type.STRING, description: "Optional micro-app name for lab_build." },
       },
       required: ["action"],
+    },
+  },
+  {
+    name: "sara2050Horizon",
+    description: "Run SARA's 2050 Ambient Intelligence capabilities: launch a continuous multi-horizon goal with Agent-to-Agent contracts ('continuous_goal'), simulate physical/system cause-and-effect in the Causal World Model ('world_simulate'), generate an Ed25519-signed Proof-Carrying Decision ('proof_decision'), query or add to the Lifelong Memory Graph ('memory_graph'), or inspect sustainability & affective calibration ('status').",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        action: { type: Type.STRING, enum: ["continuous_goal", "world_simulate", "proof_decision", "memory_graph", "status"] },
+        input: { type: Type.STRING, description: "Objective, action to simulate, or memory graph query." },
+      },
+      required: ["action"],
+    },
+  },
+  {
+    name: "switchPersonaAndUiMode",
+    description: "Switch between SARA (real girl companion UI; turns Jarvis/Ultron/Vision/Friday OFF), J.A.R.V.I.S. (Core UI + Charon voice), ULTRON (Ultron UI + Fenrir voice), V.I.S.I.O.N. (Mind-Stone Synthesis UI + Orus voice), and F.R.I.D.A.Y. (Tactical Counter-Pattern & Suit Reroute mode + Kore voice).",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        target: { type: Type.STRING, enum: ["sara", "jarvis", "ultron", "vision", "friday"], description: "Target mode to activate ('jarvis', 'ultron', 'vision', 'friday', or 'sara')." },
+      },
+      required: ["target"],
+    },
+  },
+  {
+    name: "executiveOperations",
+    description: "Execute movie-style J.A.R.V.I.S. / SARA Executive & Operational capabilities: 'morning_briefing' (60s executive summary), 'log_finance' (voice expense/income logger, e.g. 'log ₹1200 for server hosting'), 'crm_proposal' (track client/AttendEasy milestone & queue proposal for approval), 'resolve_approval' (approve/reject pending item), 'boardroom' (4-agent Finance/Legal/Marketing/Engineering debate), 'market_research' (competitor/market intelligence brief), 'switch_workspace' (e.g. 'business mode' or 'AttendEasy'), 'smart_room' (IoT lights/plugs/cameras or 'lock down the workspace'), 'concierge' (travel, appointment, bill reminder), or 'build_diagnose' (diagnose build/line error).",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        action: {
+          type: Type.STRING,
+          enum: [
+            "morning_briefing",
+            "log_finance",
+            "crm_proposal",
+            "resolve_approval",
+            "boardroom",
+            "market_research",
+            "switch_workspace",
+            "smart_room",
+            "concierge",
+            "build_diagnose",
+          ],
+        },
+        input: { type: Type.STRING, description: "Utterance, topic, client/project name, approval ID, workspace name, or IoT command." },
+        amount: { type: Type.NUMBER, description: "Optional numeric INR/USD quote or cost." },
+        approved: { type: Type.BOOLEAN, description: "True to approve, false to reject (for resolve_approval)." },
+      },
+      required: ["action"],
+    },
+  },
+  {
+    name: "centralOperatingLayer",
+    description:
+      "Distributed Central Operating Layer across Windows 10 Pro PC ('win10_pc'), Live Desktop Wallpaper ('hud_wallpaper'), mobile, and ESP32/lab nodes. Executes OS commands, opens apps, checks i5/8GB RAM health, toggles live desktop wallpaper, dispatches to connected hardware nodes, or locks the workstation.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        directive: {
+          type: Type.STRING,
+          description: "Natural command or node action (e.g., 'check RAM usage', 'open vscode', 'embed wallpaper', 'node esp32_lab: relay_on', 'lock pc').",
+        },
+        nodeId: {
+          type: Type.STRING,
+          description: "Optional specific target node ID (default 'win10_pc').",
+        },
+      },
+      required: ["directive"],
+    },
+  },
+  {
+    name: "threeLayerSystemControl",
+    description:
+      "Full-System 3-Layer OS Control Router: cascades Layer 1 (Instant Shell/OS) -> Layer 2 (Windows UI Automation Tree control names/IDs) -> Layer 3 (Vision-Guided Computer Use: See -> Think -> Act -> Verify).",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        goal: { type: Type.STRING, description: "Goal to accomplish on the PC." },
+        preferredLayer: {
+          type: Type.STRING,
+          enum: ["auto", "layer1_shell", "layer2_uia", "layer3_vision"],
+          description: "Preferred execution layer (defaults to 'auto' smart cascade).",
+        },
+        shellCommand: { type: Type.STRING, description: "Optional direct Layer 1 command." },
+        controlName: { type: Type.STRING, description: "Optional Layer 2 UIA button/input name." },
+      },
+      required: ["goal"],
+    },
+  },
+  {
+    name: "smartHalfTaskExecutor",
+    description:
+      "Proactive Half-Task & Ambiguous Intent Completer ('Act First with Smart Defaults, Suggest Next'). Use immediately for incomplete requests like 'play arjit song', 'start my work', or 'open my project' — NEVER ask 'Which app?' or 'Which song?'.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        request: { type: Type.STRING, description: "The user's incomplete or shorthand request." },
+      },
+      required: ["request"],
+    },
+  },
+  {
+    name: "autonomousSkillTrainer",
+    description:
+      "Voyager + Reflexion Self-Training Engine: executes a previously learned Python skill in <5ms, OR researches documentation from the internet, practices inside an isolated sandbox until PRACTICE_PASSED, saves to learned_skills/, and executes it.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        topicOrSkill: {
+          type: Type.STRING,
+          description: "Skill name or new capability topic to research, practice in sandbox, and execute.",
+        },
+        argsJson: {
+          type: Type.STRING,
+          description: "Optional JSON kwargs object passed to `execute(**kwargs)`.",
+        },
+      },
+      required: ["topicOrSkill"],
+    },
+  },
+  {
+    name: "frontierJarvisSuite",
+    description:
+      "Coworker, Platform & Frontier J.A.R.V.I.S. capabilities: Ghost Worker overnight queue, Visual AR Guide Mode, Photographic Screen Memory recall, Ephemeral Zero-App Widget generator, Ghost Clipboard semantic pipe, Synthetic Boardroom debate, Butterfly-Effect code blast radius, and Budget Guard.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        capability: {
+          type: Type.STRING,
+          enum: [
+            "ghost_worker",
+            "guide_mode",
+            "recall_screen",
+            "ephemeral_widget",
+            "ghost_clipboard",
+            "synthetic_boardroom",
+            "butterfly_effect",
+            "budget_guard",
+          ],
+        },
+        input: { type: Type.STRING, description: "Prompt, search query, dilemma, file path, or clipboard text." },
+      },
+      required: ["capability", "input"],
+    },
+  },
+  {
+    name: "avengersPantheon",
+    description:
+      "Complete Avengers / MCU AI Pantheon capabilities: 'vision_triad' (J.A.R.V.I.S. + Ultron + Mind Stone synthesis), 'phase_mode_on' / 'phase_mode_off' (50% translucent WS_EX_TRANSPARENT click-through HUD + zero-trace), 'mind_stone_nexus' (correlate CVEs/updates with local projects), 'stark_3d_blueprint' (3D explodable hardware/circuit schematic + pinout + firmware + INR BOM), 'forensic_timeline' (Iron Man 3 crash/diff time-scrubber), 'edith_abort_rollback' ('Abort! Abort!' transactional batch undo), 'friday_fight_pattern' ('Analyze his fight pattern' counter-move), 'friday_suit_reroute' (subsystem damage & auto-reroute map), 'veronica_drop_pod' (60s encrypted bare-metal restore pod), or 'karen_recon_drone' (background URL watcher drone).",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        capability: {
+          type: Type.STRING,
+          enum: [
+            "vision_triad",
+            "phase_mode_on",
+            "phase_mode_off",
+            "mind_stone_nexus",
+            "stark_3d_blueprint",
+            "forensic_timeline",
+            "edith_abort_rollback",
+            "friday_fight_pattern",
+            "friday_suit_reroute",
+            "veronica_drop_pod",
+            "karen_recon_drone",
+          ],
+        },
+        input: { type: Type.STRING, description: "Topic, hardware prompt, URL, or error pattern." },
+      },
+      required: ["capability"],
     },
   },
 ];
@@ -631,6 +804,188 @@ export async function handleLiveAgentTool(runtime: SaraRuntime, name: string, ar
         return { ok: true, report };
       }
       return runtime.guardianSuite.synthesizeLiveBriefing("voice_request") as unknown as Record<string, unknown>;
+    }
+    case "sara2050Horizon": {
+      const action = String(args.action || "status");
+      const textInput = String(args.input || "").trim();
+      if (action === "continuous_goal") {
+        const plan = await runtime.sara2050.launchContinuousGoal(textInput || "Optimize workspace reliability and continuous self-checks");
+        return { ok: true, plan };
+      }
+      if (action === "world_simulate") {
+        return { ok: true, prediction: runtime.sara2050.simulateWorldIntervention(textInput || "Update workspace build") };
+      }
+      if (action === "proof_decision") {
+        const decision = await runtime.sara2050.createProofCarryingDecision(textInput || "Verify workspace integrity", runtime.isOwnerAuthorized());
+        return { ok: decision.formalProof.satisfiable, decision };
+      }
+      if (action === "memory_graph") {
+        return runtime.sara2050.queryMemorySubgraph(textInput, 8) as unknown as Record<string, unknown>;
+      }
+      return runtime.sara2050.status() as unknown as Record<string, unknown>;
+    }
+    case "switchPersonaAndUiMode": {
+      const rawTarget = String(args.target || "sara").toLowerCase();
+      const target =
+        rawTarget === "jarvis"
+          ? "jarvis"
+          : rawTarget === "ultron"
+            ? "ultron"
+            : rawTarget === "vision"
+              ? "vision"
+              : rawTarget === "friday"
+                ? "friday"
+                : "sara";
+      const updated = await runtime.switchPersonaMode(target);
+      return {
+        ok: true,
+        activeMode: updated.personas.activeMode,
+        surfaceMode: updated.jarvis.surfaceMode,
+        voiceName: updated.voice.voiceName,
+        note: `Switched active AI persona to ${target.toUpperCase()} (${updated.voice.voiceName}).`,
+      };
+    }
+    case "executiveOperations": {
+      const action = String(args.action || "morning_briefing");
+      const textInput = String(args.input || "").trim();
+      if (action === "morning_briefing") {
+        return runtime.executiveOps.generateMorningExecutiveBriefing() as unknown as Record<string, unknown>;
+      }
+      if (action === "log_finance") {
+        return runtime.executiveOps.logFromNaturalUtterance(textInput || `₹${Number(args.amount) || 0} general expense`) as unknown as Record<string, unknown>;
+      }
+      if (action === "crm_proposal") {
+        return (await runtime.executiveOps.upsertCrmDealAndDraftProposal({
+          clientOrProject: textInput || "AttendEasy",
+          quotedValueInr: typeof args.amount === "number" ? args.amount : undefined,
+          autoDraftProposal: true,
+        })) as unknown as Record<string, unknown>;
+      }
+      if (action === "resolve_approval") {
+        return { ok: true, item: runtime.executiveOps.resolveApproval(textInput, args.approved !== false) };
+      }
+      if (action === "boardroom") {
+        return { ok: true, debate: await runtime.executiveOps.conveneBoardroom(textInput || "Evaluate product roadmap & pricing") };
+      }
+      if (action === "market_research") {
+        return { ok: true, brief: await runtime.executiveOps.runResearchBrief(textInput || "Market & competitor trends") };
+      }
+      if (action === "switch_workspace") {
+        return runtime.executiveOps.switchWorkspaceContext(textInput || "business_mode") as unknown as Record<string, unknown>;
+      }
+      if (action === "smart_room") {
+        return (await runtime.executiveOps.triggerSmartRoomCommand(textInput || "lock down workspace")) as unknown as Record<string, unknown>;
+      }
+      if (action === "concierge") {
+        return runtime.executiveOps.addConciergeItem({
+          category: "appointment",
+          title: textInput || "Concierge reminder",
+          scheduledFor: "Upcoming",
+          estimatedCostInr: typeof args.amount === "number" ? args.amount : undefined,
+        }) as unknown as Record<string, unknown>;
+      }
+      return runtime.executiveOps.inspectBuildOutput(textInput) as unknown as Record<string, unknown>;
+    }
+    case "centralOperatingLayer": {
+      const directive = String(args.directive || "").trim();
+      const nodeId = typeof args.nodeId === "string" && args.nodeId.trim() ? args.nodeId.trim() : null;
+      if (nodeId && nodeId !== "win10_pc") {
+        const res = await runtime.centralLayer.executeOnNode(nodeId, directive, {});
+        return { ok: true, nodeId, result: res };
+      }
+      return (await runtime.centralLayer.dispatchIntent(directive, "voice")) as unknown as Record<string, unknown>;
+    }
+    case "threeLayerSystemControl": {
+      const res = await runtime.fullControl.executeThreeLayerControl({
+        goal: String(args.goal || ""),
+        preferredLayer: (args.preferredLayer as "auto" | "layer1_shell" | "layer2_uia" | "layer3_vision") || "auto",
+        shellCommand: typeof args.shellCommand === "string" ? args.shellCommand : undefined,
+        uiaTarget: typeof args.controlName === "string" ? { controlName: args.controlName } : undefined,
+      });
+      return res as unknown as Record<string, unknown>;
+    }
+    case "smartHalfTaskExecutor": {
+      const res = await runtime.fullControl.completeHalfTask(String(args.request || ""), { autoOpenBrowser: true });
+      return res as unknown as Record<string, unknown>;
+    }
+    case "autonomousSkillTrainer": {
+      let parsedArgs: Record<string, unknown> = {};
+      if (typeof args.argsJson === "string" && args.argsJson.trim()) {
+        try {
+          parsedArgs = JSON.parse(args.argsJson);
+        } catch {
+          parsedArgs = { text: args.argsJson };
+        }
+      }
+      const res = await runtime.fullControl.runOrLearnSkill(String(args.topicOrSkill || ""), parsedArgs);
+      return res as unknown as Record<string, unknown>;
+    }
+    case "frontierJarvisSuite": {
+      const cap = String(args.capability || "");
+      const text = String(args.input || "");
+      if (cap === "ghost_worker") {
+        const job = runtime.frontier.enqueueGhostJob({ title: text, kind: "research_topic", targetOrPrompt: text });
+        return { ok: true, job };
+      }
+      if (cap === "guide_mode") {
+        return (await runtime.frontier.generateGuideModeSteps(text)) as unknown as Record<string, unknown>;
+      }
+      if (cap === "recall_screen") {
+        return { ok: true, matches: runtime.frontier.recallScreenMemory(text) };
+      }
+      if (cap === "ephemeral_widget") {
+        return { ok: true, widget: await runtime.frontier.generateEphemeralWidget(text) };
+      }
+      if (cap === "ghost_clipboard") {
+        return (await runtime.frontier.transformClipboard(text, "explain")) as unknown as Record<string, unknown>;
+      }
+      if (cap === "synthetic_boardroom") {
+        return (await runtime.frontier.runSyntheticBoardroom(text)) as unknown as Record<string, unknown>;
+      }
+      if (cap === "butterfly_effect") {
+        return runtime.frontier.analyzeButterflyEffect(text || "runtime/saraRuntime.ts") as unknown as Record<string, unknown>;
+      }
+      return runtime.frontier.evaluateBudgetGuard({ merchant: text || "Cloud API", amountInr: 499 }) as unknown as Record<string, unknown>;
+    }
+    case "avengersPantheon": {
+      const cap = String(args.capability || "");
+      const text = String(args.input || "").trim();
+      if (cap === "vision_triad") {
+        return (await runtime.avengers.synthesizeVisionTriad(text)) as unknown as Record<string, unknown>;
+      }
+      if (cap === "phase_mode_on") {
+        return runtime.avengers.setPhaseMode({ enabled: true, opacity: 0.5, zeroTrace: true }) as unknown as Record<string, unknown>;
+      }
+      if (cap === "phase_mode_off") {
+        return runtime.avengers.setPhaseMode({ enabled: false }) as unknown as Record<string, unknown>;
+      }
+      if (cap === "mind_stone_nexus") {
+        return (await runtime.avengers.correlateMindStoneNexus()) as unknown as Record<string, unknown>;
+      }
+      if (cap === "stark_3d_blueprint") {
+        return (await runtime.avengers.generateStark3dBlueprint(text)) as unknown as Record<string, unknown>;
+      }
+      if (cap === "forensic_timeline") {
+        return (await runtime.avengers.buildForensicTimeline(120)) as unknown as Record<string, unknown>;
+      }
+      if (cap === "edith_abort_rollback") {
+        runtime.emergencyStop("edith_voice_abort");
+        return runtime.avengers.abortAndRollbackBatch() as unknown as Record<string, unknown>;
+      }
+      if (cap === "friday_fight_pattern") {
+        return (await runtime.avengers.analyzeFridayFightPattern({ history: [text || "Recurring build failure"] })) as unknown as Record<string, unknown>;
+      }
+      if (cap === "friday_suit_reroute") {
+        return runtime.avengers.inspectSuitSubsystemsAndReroute() as unknown as Record<string, unknown>;
+      }
+      if (cap === "veronica_drop_pod") {
+        return runtime.avengers.deployVeronicaDropPod(text || "veronica-voice-pod") as unknown as Record<string, unknown>;
+      }
+      const drone = runtime.avengers.deployKarenReconDrone({
+        name: "Voice Recon Drone",
+        targetUrl: text || "https://github.com",
+      });
+      return { ok: true, drone };
     }
     default:
       return { error: `Unknown tool ${name}` };

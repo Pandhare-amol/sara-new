@@ -41,6 +41,13 @@ try {
       GetWindowLongPtrW: user32.func('intptr_t __stdcall GetWindowLongPtrW(intptr_t hwnd, int index)'),
       GetClassNameW: user32.func('int __stdcall GetClassNameW(intptr_t hwnd, _Out_ uint8_t *buf, int max)'),
       DwmGetCloaked: dwmapi.func('int32 __stdcall DwmGetWindowAttribute(intptr_t hwnd, uint32 attr, _Out_ uint32 *value, uint32 size)'),
+      FindWindowW: user32.func('intptr_t __stdcall FindWindowW(str16 className, str16 windowName)'),
+      FindWindowExW: user32.func('intptr_t __stdcall FindWindowExW(intptr_t hwndParent, intptr_t hwndChildAfter, str16 className, str16 windowName)'),
+      SendMessageTimeoutW: user32.func('intptr_t __stdcall SendMessageTimeoutW(intptr_t hwnd, uint32 msg, uintptr_t wParam, intptr_t lParam, uint32 flags, uint32 timeout, _Out_ uintptr_t *result)'),
+      SetParent: user32.func('intptr_t __stdcall SetParent(intptr_t hWndChild, intptr_t hWndNewParent)'),
+      ShowWindow: user32.func('bool __stdcall ShowWindow(intptr_t hwnd, int nCmdShow)'),
+      SetWindowLongPtrW: user32.func('intptr_t __stdcall SetWindowLongPtrW(intptr_t hwnd, int index, intptr_t dwNewLong)'),
+      SetLayeredWindowAttributes: user32.func('bool __stdcall SetLayeredWindowAttributes(intptr_t hwnd, uint32 crKey, uint8 bAlpha, uint32 dwFlags)'),
     };
   }
 } catch (error) {
@@ -166,4 +173,91 @@ function windowRect(hwnd) {
   }
 }
 
-module.exports = { available: () => !!api, startRawInput, listWindows, windowRect, hwndOf };
+/**
+ * Mounts an Electron BrowserWindow into Windows 10 Pro's hidden `WorkerW`
+ * desktop layer behind desktop icons (Progman 0x052C -> SHELLDLL_DefView -> WorkerW).
+ */
+function embedWindowAsWallpaper(win) {
+  if (!api || !win || win.isDestroyed?.()) return false;
+  try {
+    const saraHwnd = hwndOf(win);
+    const progman = api.FindWindowW('Progman', null);
+    if (!progman) return false;
+
+    const msgResult = [0];
+    api.SendMessageTimeoutW(progman, 0x052c, 0, 0, 0x0000, 1000, msgResult);
+
+    let workerw = 0;
+    const cb = api.koffi.register((hwnd) => {
+      try {
+        const shellView = api.FindWindowExW(hwnd, 0, 'SHELLDLL_DefView', null);
+        if (shellView) {
+          workerw = api.FindWindowExW(0, hwnd, 'WorkerW', null);
+        }
+      } catch {
+        /* continue */
+      }
+      return true;
+    }, api.koffi.pointer(api.enumProto));
+
+    try {
+      api.EnumWindows(cb, 0);
+    } finally {
+      api.koffi.unregister(cb);
+    }
+
+    if (!workerw) return false;
+    api.SetParent(saraHwnd, workerw);
+    api.ShowWindow(saraHwnd, 3); // SW_SHOWMAXIMIZED
+    return true;
+  } catch (err) {
+    console.warn('[win32] embedWindowAsWallpaper failed:', err && err.message);
+    return false;
+  }
+}
+
+function detachWindowFromWallpaper(win) {
+  if (!api || !win || win.isDestroyed?.()) return false;
+  try {
+    const saraHwnd = hwndOf(win);
+    api.SetParent(saraHwnd, 0);
+    api.ShowWindow(saraHwnd, 9); // SW_RESTORE
+    return true;
+  } catch (err) {
+    console.warn('[win32] detachWindowFromWallpaper failed:', err && err.message);
+    return false;
+  }
+}
+
+function setWindowPhaseMode(win, enabled, opacity = 0.5) {
+  if (!api || !win || win.isDestroyed?.()) return false;
+  try {
+    const hwnd = hwndOf(win);
+    const GWL_EXSTYLE = -20;
+    const WS_EX_LAYERED = 0x00080000;
+    const WS_EX_TRANSPARENT = 0x00000020;
+    const LWA_ALPHA = 0x00000002;
+    const cur = Number(api.GetWindowLongPtrW(hwnd, GWL_EXSTYLE));
+    const next = enabled
+      ? (cur | WS_EX_LAYERED | WS_EX_TRANSPARENT)
+      : ((cur | WS_EX_LAYERED) & ~WS_EX_TRANSPARENT);
+    api.SetWindowLongPtrW(hwnd, GWL_EXSTYLE, next);
+    const alpha = Math.max(64, Math.min(255, Math.round((enabled ? opacity : 1.0) * 255)));
+    api.SetLayeredWindowAttributes(hwnd, 0, alpha, LWA_ALPHA);
+    return true;
+  } catch (err) {
+    console.warn('[win32] setWindowPhaseMode failed:', err && err.message);
+    return false;
+  }
+}
+
+module.exports = {
+  available: () => !!api,
+  startRawInput,
+  listWindows,
+  windowRect,
+  hwndOf,
+  embedWindowAsWallpaper,
+  detachWindowFromWallpaper,
+  setWindowPhaseMode,
+};
