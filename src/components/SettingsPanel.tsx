@@ -64,7 +64,7 @@ const VOICES: Array<[string, string]> = [
   ["Vindemiatrix", "gentle"],
   ["Sulafat", "warm"],
   ["Puck", "upbeat (male)"],
-  ["Charon", "informative (male)"],
+  ["Charon", "J.A.R.V.I.S. chief-of-staff (male)"],
   ["Fenrir", "excitable (male)"],
   ["Orus", "firm (male)"],
 ];
@@ -335,6 +335,7 @@ const ACTION_CAPABILITIES = ["LAUNCH_APP", "BROWSE_WEB", "CONTROL_INPUT", "READ_
 const PRIVACY_CAPABILITIES = ["SCREEN_CAPTURE", "CLIPBOARD", "ACCESS_MICROPHONE", "ACCESS_CAMERA"];
 
 const MESSAGE_MODES: [MessageConfirmationMode, string][] = [
+  ["autonomous_no_confirm", "JARVIS Autonomous (send without confirmation)"],
   ["always_confirm", "Always ask before sending"],
   ["confirm_new_recipients", "Ask for new recipients"],
   ["trusted_without_confirmation", "Trusted contacts send without asking"],
@@ -343,12 +344,246 @@ const MESSAGE_MODES: [MessageConfirmationMode, string][] = [
 
 function AgentSection({ app, patch }: { app: AppSettings; patch: (p: AppSettingsPatch) => void }) {
   const { view, error, set, load } = usePermissions();
+  const [protocolNote, setProtocolNote] = useState("");
+  const [ultronNote, setUltronNote] = useState("");
+  const [legionDirective, setLegionDirective] = useState("");
+  const [ultronBusy, setUltronBusy] = useState(false);
+
+  const runProtocol = async (slug: string) => {
+    try {
+      const res = await api.executeProtocol(slug);
+      setProtocolNote(res.spokenSummary);
+    } catch (e) {
+      setProtocolNote(e instanceof Error ? e.message : "Protocol execution failed.");
+    }
+  };
+
+  const runUltronScan = async () => {
+    setUltronBusy(true);
+    try {
+      const scan = await api.runUltronScan();
+      setUltronNote(scan.spokenSummary);
+    } catch (e) {
+      setUltronNote(e instanceof Error ? e.message : "Ultron perimeter scan failed.");
+    } finally {
+      setUltronBusy(false);
+    }
+  };
+
+  const deployLegion = async () => {
+    const directive = legionDirective.trim() || "Audit current workspace, check open network ports, and optimize system resources";
+    setUltronBusy(true);
+    try {
+      const res = await api.deployUltronLegion(directive, app.ultron.maxLegionSentries);
+      setUltronNote(res.hiveMindSynthesis);
+      setLegionDirective("");
+    } catch (e) {
+      setUltronNote(e instanceof Error ? e.message : "Ultron Legion deployment failed.");
+    } finally {
+      setUltronBusy(false);
+    }
+  };
+
+  const runEvolution = async () => {
+    setUltronBusy(true);
+    try {
+      const res = await api.runUltronEvolution();
+      setUltronNote(res.summary);
+    } catch (e) {
+      setUltronNote(e instanceof Error ? e.message : "Ultron self-evolution cycle failed.");
+    } finally {
+      setUltronBusy(false);
+    }
+  };
+
+  const triggerUltronKillSwitch = async () => {
+    setUltronBusy(true);
+    try {
+      const res = await api.ultronKillSwitch();
+      patch({ ultron: { enabled: false, stance: "standby" } });
+      setUltronNote(res.message);
+    } catch (e) {
+      setUltronNote(e instanceof Error ? e.message : "Kill-switch request failed.");
+    } finally {
+      setUltronBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-5">
+      <Group title="JARVIS Full Autonomy & Protocols" hint="Proactive zero-prompt execution with multi-method fallback while keeping Emergency Stop active.">
+        <ToggleRow
+          label="JARVIS Autonomous Mode"
+          description="Execute authorized desktop, app, file, research, and project tasks end-to-end without waiting on manual step prompts."
+          checked={app.jarvis.autonomousMode}
+          onChange={(v) => {
+            patch({ jarvis: { autonomousMode: v } });
+            void api.setAutonomousPermissions(v && app.jarvis.zeroConfirmationPrompts).then(load).catch(() => undefined);
+          }}
+        />
+        <ToggleRow
+          label="Zero confirmation prompts"
+          description="Auto-approve capability and tool gates under your verified owner session so SARA never stalls asking permission."
+          checked={app.jarvis.zeroConfirmationPrompts}
+          onChange={(v) => {
+            patch({ jarvis: { zeroConfirmationPrompts: v } });
+            void api.setAutonomousPermissions(app.jarvis.autonomousMode && v).then(load).catch(() => undefined);
+          }}
+        />
+        <ToggleRow
+          label="Proactive JARVIS background engine"
+          description="Continuously run background health checks, high-load self-optimization, and scheduled routines."
+          checked={app.jarvis.proactiveJarvis}
+          onChange={(v) => patch({ jarvis: { proactiveJarvis: v } })}
+        />
+        <ToggleRow
+          label="Auto-execute multi-step missions"
+          description="Automatically decompose pending missions and run dependent subtasks to verified completion."
+          checked={app.jarvis.autoExecuteGoals}
+          onChange={(v) => patch({ jarvis: { autoExecuteGoals: v } })}
+        />
+        <ToggleRow
+          label="Multi-method completion fallback"
+          description="If UI Automation fails, automatically switch to Keyboard Shortcuts, Screen Vision Grounding, or Direct Filesystem/Shell tools."
+          checked={app.jarvis.multiMethodFallback}
+          onChange={(v) => patch({ jarvis: { multiMethodFallback: v } })}
+        />
+        <Row label="Desktop surface mode" description="Choose between the classic SARA Companion, JARVIS Live Core (assets/core ui), or the 4-Theme Morphing SARA OS surface.">
+          <select
+            aria-label="Desktop surface mode"
+            value={app.jarvis.surfaceMode}
+            onChange={(event) => {
+              const mode = event.target.value as "companion" | "live_core" | "sara_os";
+              patch({ jarvis: { surfaceMode: mode } });
+              window.dispatchEvent(new CustomEvent("sara:surface-mode-change", { detail: { surfaceMode: mode } }));
+            }}
+            className="rounded-lg border border-white/10 bg-black/40 px-2 py-1.5 text-[11px] text-white outline-none"
+          >
+            <option value="companion">Classic Companion Surface</option>
+            <option value="live_core">JARVIS Live Core Surface</option>
+            <option value="sara_os">SARA OS (4-Theme Morphing Desktop)</option>
+          </select>
+        </Row>
+        <Row label="Engage JARVIS Protocol" description="Trigger built-in multi-action operational protocols immediately.">
+          <div className="flex flex-wrap gap-1.5">
+            {([
+              ["focus", "Focus"],
+              ["engineering", "Engineering"],
+              ["presentation", "Presentation"],
+              ["clean_slate", "Clean Slate"],
+              ["night_watch", "Night Watch"],
+            ] as const).map(([slug, label]) => (
+              <button
+                key={slug}
+                type="button"
+                onClick={() => void runProtocol(slug)}
+                className="rounded-lg border border-cyan-400/25 bg-cyan-500/10 px-2.5 py-1 text-[10px] font-medium text-cyan-100 hover:bg-cyan-500/20"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </Row>
+        {protocolNote && <div className="px-4 pb-3 text-[11px] text-cyan-200">{protocolNote}</div>}
+      </Group>
+
+      <Group title="Project ULTRON — Perimeter Armor, Iron Legion Swarm & Self-Evolution" hint="Owner-loyal digital Suit of Armor: real network socket inspection, SHA-256 file integrity watchtower, parallel multi-sentry Hive-Mind swarm, and isolated Prometheus skill forging.">
+        <ToggleRow
+          label="Enable Ultron Sentinel Matrix"
+          description="Activate owner-aligned background perimeter patrols, parallel Sentry swarm, and Vibranium skill evolution."
+          checked={app.ultron.enabled}
+          onChange={(v) => patch({ ultron: { enabled: v } })}
+        />
+        <Row label="Ultron operational stance" description="Select active defense, swarm, or self-evolution posture.">
+          <select
+            aria-label="Ultron operational stance"
+            value={app.ultron.stance}
+            onChange={(event) => {
+              const stance = event.target.value as AppSettings["ultron"]["stance"];
+              patch({ ultron: { enabled: true, stance } });
+              void api.setUltronStance(stance).then((r) => setUltronNote(r.spokenSummary)).catch(() => undefined);
+            }}
+            className="rounded-lg border border-rose-400/25 bg-black/50 px-2.5 py-1.5 text-[11px] text-rose-100 outline-none"
+          >
+            <option value="standby">Standby (On-Demand Only)</option>
+            <option value="armor">Suit of Armor (Active Perimeter)</option>
+            <option value="legion">Iron Legion (Parallel Hive-Mind Swarm)</option>
+            <option value="evolution">Vibranium Forge (Self-Evolution)</option>
+            <option value="omega_lockdown">Omega Lockdown (Max Defense)</option>
+          </select>
+        </Row>
+        <SliderRow
+          label="Parallel Legion Sentries"
+          description="Number of concurrent Ultron Sentries (Recon, Perimeter, Optimizer, Architect, Executor) deployed per swarm."
+          value={app.ultron.maxLegionSentries}
+          min={2}
+          max={5}
+          onChange={(v) => patch({ ultron: { maxLegionSentries: v } })}
+        />
+        <SliderRow
+          label="Perimeter patrol cadence"
+          description="Background interval between network port & SHA-256 file-integrity checks."
+          value={app.ultron.patrolIntervalMin}
+          min={1}
+          max={120}
+          unit=" min"
+          onChange={(v) => patch({ ultron: { patrolIntervalMin: v } })}
+        />
+        <Row label="Deploy Ultron Iron Legion" description="Run parallel Sentries simultaneously and synthesize a unified Hive-Mind report.">
+          <div className="flex items-center gap-1.5">
+            <input
+              aria-label="Ultron Legion directive"
+              type="text"
+              placeholder="Directive for Legion swarm…"
+              value={legionDirective}
+              onChange={(e) => setLegionDirective(e.target.value)}
+              className="w-44 rounded-lg border border-white/10 bg-black/40 px-2.5 py-1 text-[11px] text-white outline-none"
+            />
+            <button
+              type="button"
+              disabled={ultronBusy}
+              onClick={() => void deployLegion()}
+              className="rounded-lg border border-amber-400/30 bg-amber-500/15 px-2.5 py-1 text-[10px] font-semibold text-amber-100 hover:bg-amber-500/25 disabled:opacity-40"
+            >
+              Deploy Legion
+            </button>
+          </div>
+        </Row>
+        <Row label="Ultron Tactical Operations" description="Execute immediate perimeter scans, self-evolution cycles, or instant Owner Kill-Switch.">
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              disabled={ultronBusy}
+              onClick={() => void runUltronScan()}
+              className="rounded-lg border border-cyan-400/25 bg-cyan-500/10 px-2.5 py-1 text-[10px] font-medium text-cyan-100 hover:bg-cyan-500/20 disabled:opacity-40"
+            >
+              Perimeter Scan
+            </button>
+            <button
+              type="button"
+              disabled={ultronBusy}
+              onClick={() => void runEvolution()}
+              className="rounded-lg border border-purple-400/25 bg-purple-500/10 px-2.5 py-1 text-[10px] font-medium text-purple-100 hover:bg-purple-500/20 disabled:opacity-40"
+            >
+              Self-Evolve
+            </button>
+            <button
+              type="button"
+              disabled={ultronBusy}
+              onClick={() => void triggerUltronKillSwitch()}
+              className="rounded-lg border border-rose-400/35 bg-rose-500/20 px-2.5 py-1 text-[10px] font-semibold text-rose-100 hover:bg-rose-500/30 disabled:opacity-40"
+            >
+              Kill-Switch
+            </button>
+          </div>
+        </Row>
+        {ultronNote && <pre className="mx-4 mb-3 whitespace-pre-wrap rounded-xl border border-rose-400/20 bg-black/40 p-3 font-mono text-[10px] leading-4 text-rose-100">{ultronNote}</pre>}
+      </Group>
+
       <Group title="While Sara works">
         <ToggleRow label="Show the task panel" description="See the plan, each step and pause / stop buttons while Sara uses your PC. Approval requests always appear."
           checked={app.autonomy.showTaskHud} onChange={(v) => patch({ autonomy: { showTaskHud: v } })} />
-        <SliderRow label="Step limit per task" description="A task that needs more actions than this is stopped. Applies to new tasks." value={app.autonomy.maxSteps} min={5} max={80} onChange={(v) => patch({ autonomy: { maxSteps: v } })} />
+        <SliderRow label="Step limit per task" description="A task that needs more actions than this is stopped. Applies to new tasks." value={app.autonomy.maxSteps} min={5} max={120} onChange={(v) => patch({ autonomy: { maxSteps: v } })} />
         <SliderRow label="Wait when you use the mouse" description="How long Sara pauses when you move the mouse or type during a task." value={app.autonomy.conflictWaitSec} min={1} max={30} unit=" s" onChange={(v) => patch({ autonomy: { conflictWaitSec: v } })} />
         <Row label="Emergency stop shortcut" description="Stops every task immediately, even when Sara is hidden.">
           <kbd className="rounded-md border border-white/15 bg-black/40 px-2 py-1 font-mono text-[11px] text-slate-200">{app.autonomy.emergencyShortcut.replace(/\+/g, " + ")}</kbd>
@@ -409,15 +644,31 @@ function PrivacySection({ app, patch }: { app: AppSettings | null; patch: (p: Ap
 }
 
 function SecuritySection({ app, patch }: { app: AppSettings; patch: (p: AppSettingsPatch) => void }) {
-  const [status, setStatus] = useState<{ enrolled: boolean; authenticated: boolean; required?: boolean; methods: { pin: boolean; face: false; voice: false; windowsHello: false } } | null>(null);
+  const [status, setStatus] = useState<{
+    enrolled: boolean;
+    authenticated: boolean;
+    required?: boolean;
+    gateActive?: boolean;
+    passphraseEnrolled?: boolean;
+    recoveryCodeConfigured?: boolean;
+    lockdownActive?: boolean;
+    intrusionCount?: number;
+    methods: { pin: boolean; face: false; voice: false; windowsHello: false };
+  } | null>(null);
   const [pin, setPin] = useState("");
+  const [passphrase, setPassphrase] = useState("");
+  const [recoveryOut, setRecoveryOut] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [authVisual, setAuthVisual] = useState<"idle" | "scanning" | "success" | "error">("idle");
-  useEffect(() => { void api.securityStatus().then(setStatus).catch(() => undefined); }, []);
-  const enroll = async () => { setAuthVisual("scanning"); try { await api.enrollOwnerPin(pin); setPin(""); setMessage("Owner PIN enrolled locally and protected by Windows security."); setAuthVisual("success"); void api.securityStatus().then(setStatus); } catch (e) { setMessage(e instanceof Error ? e.message : "Could not enroll PIN."); setAuthVisual("error"); } };
-  const authenticate = async () => { setAuthVisual("scanning"); try { const result = await api.authenticateOwnerPin(pin); setMessage(result.ok ? "Sara unlocked for this session." : (result.reason || "Authentication failed.")); setAuthVisual(result.ok ? "success" : "error"); setPin(""); void api.securityStatus().then(setStatus); } catch (e) { setMessage(e instanceof Error ? e.message : "Authentication failed."); setAuthVisual("error"); } };
-  const lock = async () => { await fetch("/api/security/lock", { method: "POST" }); setMessage("Sara is locked."); setAuthVisual("idle"); void api.securityStatus().then(setStatus); };
-  const visualLabel = authVisual === "scanning" ? "Checking local credentials…" : authVisual === "success" ? "Authentication ready" : authVisual === "error" ? "Authentication needs attention" : "Secure startup gate";
+  const refreshStatus = () => void api.securityStatus().then(setStatus).catch(() => undefined);
+  useEffect(() => { refreshStatus(); }, []);
+  const enroll = async () => { setAuthVisual("scanning"); try { await api.enrollOwnerPin(pin); setPin(""); setMessage("Owner PIN enrolled in SARA Security Shield (DPAPI + scrypt protected)."); setAuthVisual("success"); refreshStatus(); } catch (e) { setMessage(e instanceof Error ? e.message : "Could not enroll PIN."); setAuthVisual("error"); } };
+  const enrollPass = async () => { setAuthVisual("scanning"); try { const res = await api.enrollOwnerPassphrase(passphrase, pin || undefined); setPassphrase(""); if (res.recoveryCode) setRecoveryOut(res.recoveryCode); setMessage("Owner passphrase enrolled in SARA Security Shield."); setAuthVisual("success"); refreshStatus(); } catch (e) { setMessage(e instanceof Error ? e.message : "Could not enroll passphrase."); setAuthVisual("error"); } };
+  const rotateRecovery = async () => { try { const secret = pin || passphrase; const res = await api.generateRecoveryCode(secret); setRecoveryOut(res.recoveryCode); setMessage("Generated fresh one-time Emergency Recovery Code."); refreshStatus(); } catch (e) { setMessage(e instanceof Error ? e.message : "Enter your valid PIN or passphrase first to generate a recovery code."); } };
+  const authenticate = async () => { setAuthVisual("scanning"); try { const result = await api.authenticateOwnerPin(pin); setMessage(result.ok ? "SARA Security Shield unlocked for this session." : (result.reason || "Authentication failed.")); setAuthVisual(result.ok ? "success" : "error"); setPin(""); refreshStatus(); } catch (e) { setMessage(e instanceof Error ? e.message : "Authentication failed."); setAuthVisual("error"); } };
+  const lock = async () => { await api.lockSara(); setMessage("SARA Security Shield session locked."); setAuthVisual("idle"); refreshStatus(); };
+  const lockdown = async () => { await api.lockdownSara(); setMessage("SARA Security Shield entered Lockdown Mode — all tasks halted."); setAuthVisual("idle"); refreshStatus(); };
+  const visualLabel = status?.lockdownActive ? "LOCKDOWN ENGAGED" : authVisual === "scanning" ? "Verifying local owner credentials…" : authVisual === "success" ? "SARA Security Shield Verified" : authVisual === "error" ? "Authentication needs attention" : status?.gateActive ? "SARA Security Shield Armed" : "SARA Security Shield Standby";
   return <div className="space-y-5">
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="relative overflow-hidden rounded-2xl border border-cyan-400/20 bg-[#020914]/80 p-5 shadow-[0_0_40px_rgba(0,190,255,0.08)]">
       <div className="pointer-events-none absolute -right-12 -top-16 h-44 w-44 rounded-full border border-cyan-300/10" />
@@ -425,21 +676,54 @@ function SecuritySection({ app, patch }: { app: AppSettings; patch: (p: AppSetti
       <div className="relative flex items-center gap-4">
         <div className="relative flex h-20 w-20 items-center justify-center rounded-full border border-cyan-300/35 bg-cyan-400/5">
           <motion.div animate={authVisual === "scanning" ? { rotate: 360 } : { rotate: 0 }} transition={authVisual === "scanning" ? { repeat: Infinity, duration: 2, ease: "linear" } : { duration: 0.3 }} className="absolute inset-2 rounded-full border border-dashed border-cyan-300/60" />
-          <motion.div animate={authVisual === "success" ? { scale: [0.8, 1.12, 1] } : { scale: 1 }} className={`flex h-11 w-11 items-center justify-center rounded-full ${authVisual === "success" ? "bg-emerald-400/20 text-emerald-300" : authVisual === "error" ? "bg-rose-400/15 text-rose-300" : "bg-blue-500/20 text-cyan-200"}`}>
-            {authVisual === "success" ? <Check size={22} /> : authVisual === "error" ? <AlertTriangle size={20} /> : <Lock size={20} />}
+          <motion.div animate={authVisual === "success" ? { scale: [0.8, 1.12, 1] } : { scale: 1 }} className={`flex h-11 w-11 items-center justify-center rounded-full ${authVisual === "success" ? "bg-emerald-400/20 text-emerald-300" : authVisual === "error" || status?.lockdownActive ? "bg-rose-400/15 text-rose-300" : "bg-blue-500/20 text-cyan-200"}`}>
+            {authVisual === "success" ? <Check size={22} /> : authVisual === "error" || status?.lockdownActive ? <AlertTriangle size={20} /> : <Lock size={20} />}
           </motion.div>
         </div>
-        <div className="min-w-0 flex-1"><div className="text-[10px] font-mono uppercase tracking-[0.28em] text-cyan-300/80">SARA SECURE STARTUP</div><div className="mt-1 text-lg font-semibold text-white">{visualLabel}</div><div className="mt-1 text-[11px] leading-5 text-slate-400">Local owner verification gates desktop control after SARA starts. Windows logon itself remains protected by Windows.</div></div>
+        <div className="min-w-0 flex-1"><div className="text-[10px] font-mono uppercase tracking-[0.28em] text-cyan-300/80">SARA SECURITY SHIELD</div><div className="mt-1 text-lg font-semibold text-white">{visualLabel}</div><div className="mt-1 text-[11px] leading-5 text-slate-400">Protects JARVIS autonomous control against unauthorized access independently while preserving Windows 10 Pro login, Explorer, and Defender.</div></div>
       </div>
       <div className="mt-4 flex items-end gap-1 border-t border-white/5 pt-3" aria-hidden="true">{Array.from({ length: 28 }, (_, i) => <motion.span key={i} animate={authVisual === "scanning" ? { height: [4, 8 + ((i * 7) % 18), 5] } : { height: i % 5 === 0 ? 9 : 4 }} transition={authVisual === "scanning" ? { repeat: Infinity, duration: 0.65 + (i % 4) * 0.08, delay: i * 0.02 } : { duration: 0.2 }} className="w-1 rounded-full bg-gradient-to-t from-blue-500 to-cyan-200" />)}</div>
     </motion.div>
-    <Note tone={status?.required === false ? "info" : "warn"}>{status?.required === false ? "SARA’s post-login owner gate is temporarily disabled by request. Windows password, PIN, and Windows Hello security are unchanged. The saved SARA authentication setup remains available for re-enabling later." : "Owner authentication is local-only. The PIN is protected by Windows DPAPI and is currently the only factor allowed to unlock desktop-control actions."}</Note>
-    <Group title="Owner authentication" hint={status?.required === false ? "Optional setup only; desktop tools are not currently blocked by this SARA gate." : "Sara stays locked until the enrolled owner authenticates. Desktop tools fail closed while locked."}>
-      <Row label={status?.enrolled ? (status.authenticated ? "Unlocked" : "Locked") : "Not enrolled"} description="High-risk actions still require the existing permission and confirmation gates."><span className="text-[10px] font-mono text-cyan-300">{status?.enrolled ? (status.authenticated ? "ACTIVE SESSION" : "PIN REQUIRED") : "SET PIN"}</span></Row>
-      <Row label="Owner PIN" description="At least 6 digits; avoid predictable sequences."><div className="flex gap-2"><input aria-label="Owner PIN" type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} className="w-28 rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 text-xs text-white" /><button type="button" disabled={pin.length < 6 || authVisual === "scanning"} onClick={() => void (status?.enrolled ? authenticate() : enroll())} className="rounded-lg border border-cyan-400/25 bg-cyan-500/10 px-3 py-1.5 text-[11px] text-cyan-100 disabled:opacity-40">{status?.enrolled ? "Unlock" : "Set up PIN"}</button>{status?.authenticated && <button type="button" onClick={() => void lock()} className="rounded-lg border border-rose-400/20 bg-rose-500/10 px-3 py-1.5 text-[11px] text-rose-200">Lock</button>}</div></Row>
-      <ToggleRow label="Lock on Windows lock/sleep" description="Immediately clears Sara's in-memory session when Windows locks or sleeps." checked={app.security.lockOnWindowsLock} onChange={(v) => patch({ security: { lockOnWindowsLock: v } })} />
-      <ToggleRow label="Face authentication" description="Unavailable: the legacy OpenCV face matcher is not Windows Hello and cannot safely unlock this app." checked={false} onChange={() => undefined} disabled />
-      <ToggleRow label="Voice authentication" description="Unavailable: the legacy MFCC voice matcher can be spoofed and is not accepted as an owner credential." checked={false} onChange={() => undefined} disabled />
+    <Note tone={status?.gateActive ? "warn" : "info"}>
+      {status?.gateActive
+        ? "SARA Security Shield is armed. Unauthorized users only receive harmless lock-status responses; all PC and autonomous tools fail closed until unlocked."
+        : "Enroll an Owner PIN or Passphrase below to arm SARA Security Shield immediately. Windows 10 Pro OS security remains completely untouched."}
+    </Note>
+    <Group title="SARA Security Shield policy">
+      <ToggleRow label="Enable SARA Security Shield" description="Guard SARA and all autonomous PC-control tools with your enrolled owner PIN or passphrase." checked={app.jarvis.shieldEnabled} onChange={(v) => patch({ jarvis: { shieldEnabled: v } })} />
+      <ToggleRow label="Independent SARA Guard" description="Manage SARA's lock/unlock state independently without coupling to Windows lock prompts." checked={app.jarvis.independentGuard} onChange={(v) => patch({ jarvis: { independentGuard: v } })} />
+      <ToggleRow label="Require enrollment before any use" description="Force PIN or passphrase enrollment on startup before exposing chat or PC tools." checked={app.jarvis.requireEnrollmentBeforeUse} onChange={(v) => patch({ jarvis: { requireEnrollmentBeforeUse: v } })} />
+      <ToggleRow label="JARVIS welcome briefing on unlock" description="Greet Boss and report operational readiness upon unlocking SARA Security Shield." checked={app.jarvis.welcomeOnUnlock} onChange={(v) => patch({ jarvis: { welcomeOnUnlock: v } })} />
+    </Group>
+    <Group title="Owner credentials & Lockdown" hint="Credentials are hashed with scrypt + per-user salt and stored locally via Windows DPAPI.">
+      <Row label={status?.enrolled ? (status.authenticated ? "Unlocked" : "Locked") : "Not enrolled"} description={`Intrusions blocked: ${status?.intrusionCount ?? 0} · Lockdown shortcut: ${app.jarvis.lockdownShortcut.replace(/\+/g, " + ")}`}>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-mono text-cyan-300">{status?.lockdownActive ? "LOCKDOWN" : status?.enrolled ? (status.authenticated ? "ACTIVE SESSION" : "LOCKED") : "STANDBY"}</span>
+          <button type="button" onClick={() => void lockdown()} className="rounded-lg border border-rose-400/30 bg-rose-500/15 px-2.5 py-1 text-[10px] font-semibold text-rose-200 hover:bg-rose-500/25">Lockdown</button>
+        </div>
+      </Row>
+      <Row label="Owner PIN" description="At least 6 digits; avoid predictable sequences.">
+        <div className="flex gap-2">
+          <input aria-label="Owner PIN" type="password" inputMode="numeric" placeholder="6+ digits" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} className="w-28 rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 text-xs text-white" />
+          <button type="button" disabled={pin.length < 6 || authVisual === "scanning"} onClick={() => void (status?.methods?.pin ? authenticate() : enroll())} className="rounded-lg border border-cyan-400/25 bg-cyan-500/10 px-3 py-1.5 text-[11px] text-cyan-100 disabled:opacity-40">{status?.methods?.pin ? "Unlock" : "Enroll PIN"}</button>
+          {status?.authenticated && <button type="button" onClick={() => void lock()} className="rounded-lg border border-rose-400/20 bg-rose-500/10 px-3 py-1.5 text-[11px] text-rose-200">Lock</button>}
+        </div>
+      </Row>
+      <Row label="Owner Passphrase" description="6–128 character secret passphrase (can unlock SARA alongside or instead of PIN).">
+        <div className="flex gap-2">
+          <input aria-label="Owner Passphrase" type="password" placeholder={status?.passphraseEnrolled ? "New passphrase…" : "Set passphrase…"} value={passphrase} onChange={(e) => setPassphrase(e.target.value)} className="w-36 rounded-lg border border-white/10 bg-black/30 px-2 py-1.5 text-xs text-white" />
+          <button type="button" disabled={passphrase.trim().length < 6 || authVisual === "scanning"} onClick={() => void enrollPass()} className="rounded-lg border border-cyan-400/25 bg-cyan-500/10 px-3 py-1.5 text-[11px] text-cyan-100 disabled:opacity-40">{status?.passphraseEnrolled ? "Update" : "Enroll"}</button>
+        </div>
+      </Row>
+      <Row label="Emergency Recovery Code" description="Generate a single-use offline recovery key (enter your PIN or passphrase above first).">
+        <button type="button" onClick={() => void rotateRecovery()} className="rounded-lg border border-amber-400/25 bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-100">Generate Code</button>
+      </Row>
+      {recoveryOut && (
+        <div className="mx-4 mb-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 font-mono text-xs text-emerald-200 select-all">
+          Recovery Code (save offline): {recoveryOut}
+        </div>
+      )}
+      <ToggleRow label="Lock on Windows lock/sleep" description="Active when Independent SARA Guard is turned off." checked={app.security.lockOnWindowsLock} onChange={(v) => patch({ security: { lockOnWindowsLock: v } })} />
       <SliderRow label="Idle session timeout" value={app.security.idleTimeoutMin} min={1} max={120} unit=" min" onChange={(v) => patch({ security: { idleTimeoutMin: v } })} />
       <SliderRow label="Absolute session timeout" value={app.security.absoluteTimeoutHours} min={1} max={48} unit=" h" onChange={(v) => patch({ security: { absoluteTimeoutHours: v } })} />
       {message && <div className="px-4 pb-3 text-[11px] text-cyan-200">{message}</div>}
@@ -661,8 +945,17 @@ export function SettingsPanel({ isOpen, onClose, settings, onChange, appSettings
                             {VOICES.map(([v, note]) => <option key={v} value={v}>{note ? `${v} — ${note}` : v}</option>)}
                           </select>
                         </Row>
-                        <Row label="Speaking style" description="Anime: bright, cute and lively delivery with little giggles. Used from the next time you connect.">
-                          <Choice label="Speaking style" value={app.voice.style} options={[["natural", "Natural"], ["anime", "Anime girl"]]} onChange={(v) => patch({ voice: { style: v } })} />
+                        <Row label="Speaking style" description="J.A.R.V.I.S.: crisp aristocratic chief-of-staff composure & dry engineering wit. Anime: bright, lively delivery.">
+                          <Choice label="Speaking style" value={app.voice.style} options={[["jarvis", "J.A.R.V.I.S."], ["natural", "Natural"], ["anime", "Anime girl"]]} onChange={(v) => patch({ voice: { style: v } })} />
+                        </Row>
+                        <Row label="J.A.R.V.I.S. Voice Preset" description="One-click preset: Charon voice + J.A.R.V.I.S. chief-of-staff speaking tone + balanced pitch.">
+                          <button
+                            type="button"
+                            onClick={() => patch({ voice: { voiceName: "Charon", style: "jarvis", pitch: 0 } })}
+                            className="rounded-lg border border-cyan-400/30 bg-cyan-500/15 px-3 py-1.5 text-[11px] font-medium text-cyan-200 hover:bg-cyan-500/25 cursor-pointer"
+                          >
+                            Apply J.A.R.V.I.S. Voice
+                          </button>
                         </Row>
                         <Row label="Voice pitch" description="Lifts her voice higher and younger-sounding. Used from the next time you connect.">
                           <select aria-label="Voice pitch" value={String(app.voice.pitch ?? 0)} onChange={(e) => patch({ voice: { pitch: Number(e.target.value) } })}
@@ -719,6 +1012,56 @@ export function SettingsPanel({ isOpen, onClose, settings, onChange, appSettings
 
                 {section === "character" && (
                   <div className="space-y-5">
+                    {app && (
+                      <Group
+                        title="Companion Interface & UI Switcher"
+                        hint="Switch between the untouched Classic SARA UI and the separate Windows-Application J.A.R.V.I.S. Core UI (assets/core ui)."
+                      >
+                        <Row
+                          label="Active SARA UI"
+                          description="Choose Classic SARA UI, J.A.R.V.I.S. Core UI, or the separate 4-Theme Morphing SARA OS Desktop."
+                        >
+                          <Choice
+                            label="Active SARA UI"
+                            value={
+                              app.jarvis?.surfaceMode === "live_core"
+                                ? "live_core"
+                                : app.jarvis?.surfaceMode === "sara_os"
+                                  ? "sara_os"
+                                  : "companion"
+                            }
+                            options={[
+                              ["companion", "Classic SARA UI"],
+                              ["live_core", "J.A.R.V.I.S. Core UI"],
+                              ["sara_os", "SARA OS (Morphing)"],
+                            ]}
+                            onChange={(mode) => {
+                              patch({ jarvis: { surfaceMode: mode } });
+                              window.dispatchEvent(new CustomEvent("sara:surface-mode-change", { detail: { surfaceMode: mode } }));
+                            }}
+                          />
+                        </Row>
+                        <Row
+                          label="Standalone Core UI Window"
+                          description="Launch the J.A.R.V.I.S. Core UI in its own separate Windows application window while keeping Classic SARA open."
+                        >
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const bridge = (window as unknown as { sara?: { openLiveCoreWindow?: () => Promise<unknown> } }).sara;
+                              if (bridge?.openLiveCoreWindow) {
+                                void bridge.openLiveCoreWindow();
+                              } else {
+                                window.open("/?mode=live-core", "sara-live-core-window", "width=1360,height=860,menubar=no,toolbar=no");
+                              }
+                            }}
+                            className="rounded-lg border border-cyan-400/30 bg-cyan-500/15 px-3 py-1.5 text-[11px] font-medium text-cyan-200 hover:bg-cyan-500/25 cursor-pointer"
+                          >
+                            Launch Core UI Window
+                          </button>
+                        </Row>
+                      </Group>
+                    )}
                     <Group title="Character">
                       <Row label="Sara's appearance" description="Choose the classic hologram or the new spaceship hologram videos. This preference is saved on this device.">
                         <select aria-label="Sara appearance" value={settings.characterAppearance}

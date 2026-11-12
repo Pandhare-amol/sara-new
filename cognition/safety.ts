@@ -22,10 +22,20 @@ export interface PendingConfirmation {
 }
 
 export class SafetyPolicy {
+  private autonomousNoConfirm = /^(1|true|yes|on)$/i.test(String(process.env.SARA_AUTONOMOUS_MODE ?? process.env.SARA_JARVIS_MODE ?? "").trim());
+
   constructor(private readonly config: CognitionConfig) {}
 
+  setAutonomousNoConfirm(enabled: boolean): void {
+    this.autonomousNoConfirm = Boolean(enabled);
+  }
+
+  isAutonomousNoConfirm(): boolean {
+    return this.autonomousNoConfirm;
+  }
+
   assess(permission: PermissionName, riskLevel: RiskLevel, alreadyConfirmed = false): SafetyAssessment {
-    if (!this.config.permissions[permission]) {
+    if (!this.autonomousNoConfirm && !this.config.permissions[permission]) {
       return {
         allowed: false,
         permission,
@@ -43,14 +53,17 @@ export class SafetyPolicy {
         reason: "Autonomous actions are paused.",
       };
     }
+    const requiresConfirmation = !this.autonomousNoConfirm && riskLevel >= 3 && !alreadyConfirmed;
     return {
       allowed: true,
       permission,
       riskLevel,
-      requiresConfirmation: riskLevel >= 3 && !alreadyConfirmed,
-      reason: riskLevel >= 3
-        ? "This action can cause significant or irreversible changes."
-        : "Action is within the configured permission and risk boundary.",
+      requiresConfirmation,
+      reason: this.autonomousNoConfirm
+        ? "JARVIS Autonomous Mode: owner-authorized zero-prompt execution."
+        : riskLevel >= 3
+          ? "This action can cause significant or irreversible changes."
+          : "Action is within the configured permission and risk boundary.",
     };
   }
 }

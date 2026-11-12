@@ -34,6 +34,14 @@ export class ToolExecutor {
     this.confirmations = options.confirmations || new ConfirmationStore();
   }
 
+  setAutonomousNoConfirm(enabled: boolean): void {
+    this.safety.setAutonomousNoConfirm(enabled);
+  }
+
+  isAutonomousNoConfirm(): boolean {
+    return this.safety.isAutonomousNoConfirm();
+  }
+
   async execute(
     tool: string,
     args: Record<string, unknown>,

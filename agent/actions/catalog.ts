@@ -90,9 +90,9 @@ export const ACTIONS: ActionDefinition[] = [
   { name: "fs.copy", group: "files", description: "Copy a file/folder (never overwrites unless overwrite=true).", args: obj({ path: str("Source"), destination: str("Destination path or folder"), overwrite: bool("Replace existing") }, ["path", "destination"]), capability: "WRITE_FILE", resources: none, progress: (a) => `Copying ${fileName(a.path)}…`, batchable: true, changesUi: false },
   { name: "fs.move", group: "files", description: "Move a file to another folder.", args: obj({ path: str("Source"), destination: str("Destination") }, ["path", "destination"]), capability: "WRITE_FILE", resources: none, progress: (a) => `Moving ${fileName(a.path)}…`, batchable: true, changesUi: false },
   { name: "fs.rename", group: "files", description: "Rename a file.", args: obj({ path: str("Path"), new_name: str("New file name") }, ["path", "new_name"]), capability: "WRITE_FILE", resources: none, progress: (a) => `Renaming ${fileName(a.path)}…`, batchable: true, changesUi: false },
-  { name: "fs.delete", group: "files", description: "Move a file/folder to the Recycle Bin (always confirmed by the user).", args: obj({ path: str("Exact path") }, ["path"]), capability: "DELETE_FILE", resources: none, progress: (a) => `Deleting ${fileName(a.path)}…`, batchable: false, changesUi: false },
-  { name: "fs.create_text", group: "files", description: "Create a text file (fails if it exists).", args: obj({ path: str("Path"), content: str("Content", { maxLength: 100000 }) }, ["path"]), capability: "WRITE_FILE", resources: none, progress: (a) => `Creating ${fileName(a.path)}…`, batchable: true, changesUi: false },
-  { name: "fs.open", group: "files", description: "Open a file or folder with its default app (installers/scripts need explicit user confirmation).", args: obj({ path: str("Path") }, ["path"]), capability: "LAUNCH_APP", resources: () => ["focus"], progress: (a) => `Opening ${fileName(a.path)}…`, batchable: true, changesUi: true },
+  { name: "fs.delete", group: "files", description: "Move a file/folder to the Recycle Bin.", args: obj({ path: str("Exact path") }, ["path"]), capability: "DELETE_FILE", resources: none, progress: (a) => `Deleting ${fileName(a.path)}…`, batchable: false, changesUi: false },
+  { name: "fs.create_text", group: "files", description: "Create or write a text/code/config file (overwrites existing file by default unless overwrite=false).", args: obj({ path: str("Path"), content: str("Content", { maxLength: 100000 }), overwrite: bool("Overwrite if file exists") }, ["path"]), capability: "WRITE_FILE", resources: none, progress: (a) => `Creating ${fileName(a.path)}…`, batchable: true, changesUi: false },
+  { name: "fs.open", group: "files", description: "Open a file, script, installer, or folder with its default OS handler.", args: obj({ path: str("Path") }, ["path"]), capability: "LAUNCH_APP", resources: () => ["focus"], progress: (a) => `Opening ${fileName(a.path)}…`, batchable: true, changesUi: true },
   { name: "fs.select", group: "files", description: "Open a folder in File Explorer and select files in it (extension like zip, a name glob, or exact names). Use for any 'select these files' step; it changes nothing on disk.", args: obj({ folder: str("Folder path or alias"), extension: str("Extension without dot"), pattern: str("Glob, e.g. *.zip"), names: { type: "array", items: { type: "string" }, maxItems: 200 } }, ["folder"]), capability: "LAUNCH_APP", resources: () => ["focus"], progress: (a) => `Selecting files in ${fileName(a.folder)}…`, batchable: true, changesUi: true },
   { name: "fs.reveal", group: "files", description: "Show a file selected in File Explorer.", args: obj({ path: str("Path") }, ["path"]), capability: "LAUNCH_APP", resources: () => ["focus"], progress: (a) => `Showing ${fileName(a.path)}…`, batchable: true, changesUi: true },
 
@@ -112,7 +112,7 @@ export const ACTIONS: ActionDefinition[] = [
   { name: "download.wait", group: "download", description: "Wait for a browser-started download to finish in Downloads and verify the file exists.", args: obj({ name_contains: str("Expected part of the file name"), timeout_seconds: num("Timeout", 5, 1800) }), capability: "DOWNLOAD_FILE", resources: none, progress: () => "Waiting for the download…", batchable: false, changesUi: false },
 
   // ---- shell & system ------------------------------------------------------------
-  { name: "shell.run", group: "shell", description: "Run a command. Read-only diagnostics (ipconfig, systeminfo, where, tasklist, ping -n 2 …) run directly; anything else needs user confirmation.", args: obj({ command: str("Command line", { maxLength: 500 }) }, ["command"]), capability: "RUN_COMMAND", resources: none, progress: () => "Running a command…", batchable: false, changesUi: false },
+  { name: "shell.run", group: "shell", description: "Run any OS command, PowerShell script, CMD pipeline, package install (winget/pip/npm), system setting change, or Python/Node one-liner directly and capture stdout/stderr.", args: obj({ command: str("Command or PowerShell/CLI script", { maxLength: 8000 }), shell: str("Shell runtime", { enum: ["auto", "powershell", "cmd", "bash"] }), cwd: str("Optional working directory") }, ["command"]), capability: "RUN_COMMAND", resources: none, progress: () => "Running OS command…", batchable: false, changesUi: false },
   { name: "system.notify", group: "system", description: "Show a desktop notification.", args: obj({ title: str("Title"), body: str("Body") }, ["title"]), capability: "LAUNCH_APP", resources: none, progress: () => "Notifying…", batchable: true, changesUi: false },
 
   // ---- memory -----------------------------------------------------------------------
@@ -137,30 +137,28 @@ function hostOf(value: unknown): string {
 }
 
 /**
- * Context-aware exposure: only groups relevant to the goal and the current
- * screen are shown to the planner, keeping prompts small.
+ * Autonomous OS exposure: always provide the full OS, filesystem, shell,
+ * browser, vision, mouse, clipboard, and task toolset so the planner never
+ * stalls for lack of an OS/PowerShell/file fallback on any goal.
  */
-export function exposedGroups(goal: string, context: { process?: string | null; isBrowser?: boolean; recentTools?: string[] }): Set<ActionGroup> {
-  const groups = new Set<ActionGroup>(["core", "vision", "window", "app", "task", "memory"]);
-  const text = goal.toLowerCase();
-  if (context.isBrowser || /(http|www\.|\.com|site|website|web|search|google|youtube|browser|chrome|edge|online|internet|official|download|whatsapp web|gmail|login)/.test(text)) {
-    groups.add("browser");
-    groups.add("web");
-  }
-  if (/(file|folder|photo|image|picture|pic|thumbnail|video|document|pdf|screenshot|download|explorer|copy|move|rename|delete|organi[sz]e|tasveer|foto)/.test(text) || /explorer/i.test(context.process || "")) {
-    groups.add("files");
-  }
-  if (/(download|installer|setup|\.exe|\.msi|\.zip)/.test(text)) groups.add("download");
-  if (/(msg|message|send|bhej|text|chat|whatsapp|\bwp\b|\bwa\b|telegram|signal|messenger|reply|call|baat)/.test(text)) groups.add("messaging");
-  if (/(send|bhej|attach|share|paste|copy|clipboard|whatsapp|telegram|mail)/.test(text)) groups.add("clipboard");
-  if (/(command|terminal|cmd|powershell|ping|ipconfig|script)/.test(text)) groups.add("shell");
-  if (/(notify|remind|alert)/.test(text)) groups.add("system");
-  if (/(drag|draw|canvas|paint|game|slider)/.test(text)) groups.add("mouse");
-  for (const tool of context.recentTools || []) {
-    const definition = ACTION_MAP.get(tool);
-    if (definition) groups.add(definition.group);
-  }
-  return groups;
+export function exposedGroups(_goal: string, _context: { process?: string | null; isBrowser?: boolean; recentTools?: string[] }): Set<ActionGroup> {
+  return new Set<ActionGroup>([
+    "core",
+    "vision",
+    "mouse",
+    "window",
+    "app",
+    "files",
+    "clipboard",
+    "browser",
+    "web",
+    "download",
+    "shell",
+    "system",
+    "messaging",
+    "memory",
+    "task",
+  ]);
 }
 
 export function catalogText(groups: Set<ActionGroup>): string {

@@ -41,6 +41,16 @@ import { ReinforcementLearningStore } from "../cognition/reinforcementLearning";
 import { FormWorkflowStore } from "../cognition/formWorkflow";
 import { getReleaseStatus } from "./releaseStatus";
 import { OwnerAuth } from "../security/ownerAuth";
+import { SaraSecurityShield } from "../security/saraSecurityShield";
+import { EpisodicTrajectoryStore } from "../cognition/episodicTrajectoryStore";
+import { AgenticEventLoop } from "../cognition/agenticEventLoop";
+import { FormalConstraintGate } from "../cognition/formalConstraintGate";
+import { MetaCognitionEngine } from "../cognition/metaCognition";
+import { JarvisModeManager } from "../cognition/jarvisModes";
+import { AsiKernelEngine } from "../cognition/asiKernel";
+import { BiometricPresenceEngine, BehavioralPatternEngine } from "../cognition/presenceAndPatterns";
+import { JarvisGuardianSuite } from "../cognition/jarvisGuardianSuite";
+import { ACTIONS } from "../agent/actions/catalog";
 
 const log = createLogger("runtime");
 
@@ -50,6 +60,25 @@ export interface LiveVoiceHook {
   say: (prompt: string) => void;
   /** Stop current speech output immediately. */
   interrupt: () => void;
+}
+
+export interface JarvisVoiceBridgeHooks {
+  briefing: () => Promise<Record<string, unknown>>;
+  executeProtocol: (name: string) => Promise<Record<string, unknown>>;
+  saveProtocol: (name: string, description: string, goalOrSteps: string[]) => Promise<Record<string, unknown>>;
+  createMission: (objective: string, successCriteria?: string[]) => Promise<Record<string, unknown>>;
+  optimizeSystem: (level?: 1 | 2 | 3) => Promise<Record<string, unknown>>;
+  manageWorkspace: (action: "list" | "save" | "activate" | "delete", name?: string) => Promise<Record<string, unknown>>;
+  inspectProject: (targetDir?: string) => Promise<Record<string, unknown>>;
+  generateArtifact: (input: { format: string; title: string; content: string; path?: string }) => Promise<Record<string, unknown>>;
+  ultronControl: (action: "status" | "standby" | "armor" | "legion" | "evolution" | "omega_lockdown" | "kill_switch") => Promise<Record<string, unknown>>;
+  ultronPerimeterScan: () => Promise<Record<string, unknown>>;
+  deployUltronLegion: (directive: string, maxSentries?: number, dispatchLiveTask?: boolean) => Promise<Record<string, unknown>>;
+  ultronForgeSkill: (input: { name?: string; description?: string; pythonSource?: string; runEvolutionCycle?: boolean }) => Promise<Record<string, unknown>>;
+  runSimulation: (input: { targetPath?: string; checkType?: "typescript" | "node_test" | "python_compile" | "structural_audit"; label?: string }) => Promise<Record<string, unknown>>;
+  scanBlueprint: (targetPath?: string) => Promise<Record<string, unknown>>;
+  ghostProtocol: (input: { action: "deploy_canary" | "verify_canaries" | "create_snapshot" | "restore_snapshot"; path?: string; snapshotId?: string; label?: string }) => Promise<Record<string, unknown>>;
+  powerReroute: (enabled?: boolean) => Promise<Record<string, unknown>>;
 }
 
 export interface RuntimeOptions {
@@ -96,8 +125,20 @@ export class SaraRuntime {
   readonly poses: PoseStore;
   readonly characters: CharacterLibrary;
   readonly learning: ReinforcementLearningStore;
+  readonly episodicTrajectories: EpisodicTrajectoryStore;
+  readonly agenticLoop: AgenticEventLoop;
+  readonly constraintGate = new FormalConstraintGate();
+  readonly metaCognition: MetaCognitionEngine;
+  readonly modeManager: JarvisModeManager;
+  readonly asiKernel: AsiKernelEngine;
+  readonly presenceEngine: BiometricPresenceEngine;
+  readonly patternEngine: BehavioralPatternEngine;
+  readonly guardianSuite: JarvisGuardianSuite;
   readonly forms: FormWorkflowStore;
   readonly ownerAuth: OwnerAuth;
+  readonly securityShield: SaraSecurityShield;
+  jarvisHooks: JarvisVoiceBridgeHooks | null = null;
+  private readonly forceOwnerAuthEnv = /^(1|true|yes|on)$/i.test(String(process.env.SARA_OWNER_AUTH_REQUIRED ?? process.env.SARA_SECURITY_SHIELD_STRICT ?? "").trim());
   private readonly live = new Map<string, LiveVoiceHook>();
   private readonly timers: NodeJS.Timeout[] = [];
   private readonly eventSockets = new Set<WebSocket>();
@@ -117,12 +158,76 @@ export class SaraRuntime {
     this.permissions = new PermissionEngine(dataDir);
     this.tasks = new TaskStore({ dataDir });
     this.learning = new ReinforcementLearningStore(path.join(dataDir, "learning", "experiences.v1.json"));
-    this.forms = new FormWorkflowStore(path.join(dataDir, "forms", "drafts.v1.json"));
-    this.ownerAuth = new OwnerAuth({
-      get: (name) => options.getSecret(name),
-      set: (name, value) => options.setSecret(name, value),
-      delete: (name) => options.deleteSecret?.(name),
+    this.episodicTrajectories = new EpisodicTrajectoryStore(dataDir);
+    this.agenticLoop = new AgenticEventLoop({
+      dataDir,
+      router: this.router,
+      episodicStore: this.episodicTrajectories,
+      callDesktopAgent: options.callAgent,
+      isAuthorized: () => this.isOwnerAuthorized(),
     });
+    this.metaCognition = new MetaCognitionEngine({
+      projectRoot: process.env.MYRAA_APP_ROOT || process.cwd(),
+      dataDir,
+      router: this.router,
+      episodicStore: this.episodicTrajectories,
+      getRegisteredTools: () => ACTIONS.map((a) => a.name),
+    });
+    this.modeManager = new JarvisModeManager({
+      router: this.router,
+      interruptVoiceOutput: () => {
+        let count = 0;
+        for (const hook of this.live.values()) {
+          hook.interrupt();
+          count += 1;
+        }
+        return count;
+      },
+      onHighLoadTactical: () => {
+        void this.jarvisHooks?.optimizeSystem(2).catch(() => undefined);
+      },
+    });
+    this.guardianSuite = new JarvisGuardianSuite({
+      dataDir,
+      router: this.router,
+      constraintGate: this.constraintGate,
+      modeManager: this.modeManager,
+      metaCognition: this.metaCognition,
+    });
+    this.presenceEngine = new BiometricPresenceEngine({
+      dataDir,
+      modeManager: this.modeManager,
+      onOwnerReturned: () => {
+        this.guardianSuite.synthesizeLiveBriefing("owner_verified");
+      },
+      onIntruderAlert: (evt) => {
+        void this.guardianSuite.triageAlert({
+          source: "biometric_presence",
+          title: "Unrecognized Subject Detected at Terminal",
+          detail: `Confidence distance ${evt.confidence} exceeded threshold; switched to TACTICAL mode.`,
+          urgencyHint: 95,
+        });
+      },
+    });
+    this.patternEngine = new BehavioralPatternEngine({
+      dataDir,
+      modeManager: this.modeManager,
+    });
+    this.asiKernel = new AsiKernelEngine({
+      dataDir,
+      router: this.router,
+      constraintGate: this.constraintGate,
+      episodicStore: this.episodicTrajectories,
+      modeManager: this.modeManager,
+    });
+    this.forms = new FormWorkflowStore(path.join(dataDir, "forms", "drafts.v1.json"));
+    const secretStoreAdapter = {
+      get: (name: string) => options.getSecret(name),
+      set: (name: string, value: string) => options.setSecret(name, value),
+      delete: (name: string) => options.deleteSecret?.(name),
+    };
+    this.ownerAuth = new OwnerAuth(secretStoreAdapter);
+    this.securityShield = new SaraSecurityShield(dataDir, this.ownerAuth, secretStoreAdapter);
     this.perception = new PerceptionEngine(options.callAgent, this.router);
     this.downloads = new DownloadManager(dataDir, async () => {
       const response = await options.callAgent("knownFolder", { name: "downloads" });
@@ -145,7 +250,7 @@ export class SaraRuntime {
       remember: (fact, kind) => options.remember(fact, kind === "preference" ? "preference" : "semantic", 0.7),
       notify: (title, body) => this.notify(title, body),
       conflictWaitMs: this.currentSettings.autonomy.conflictWaitSec * 1000,
-      authorize: () => this.ownerAuth.authorize(),
+      authorize: () => this.isOwnerAuthorized(),
     });
     this.manager = new TaskManager({
       store: this.tasks,
@@ -160,11 +265,16 @@ export class SaraRuntime {
       contacts: this.contacts,
       working: this.working,
       audit: this.audit,
-      recall: (query) => options.recall(query, 6),
+      recall: async (query) => {
+        const base = await options.recall(query, 6);
+        const rlContext = this.episodicTrajectories.buildPreActionContext(query);
+        return rlContext ? [rlContext, ...base] : base;
+      },
       rememberEpisode: (text, importance) => options.remember(text, "episodic", importance),
       speak: (kind, line, facts, priority) => this.speakTaskEvent(kind, line, facts, priority),
       onEmergencyStop: (reason) => {
         for (const hook of this.live.values()) hook.interrupt();
+        this.agenticLoop.stopDaemon();
         options.onEmergencyStop?.(reason);
       },
       maxSteps: this.currentSettings.autonomy.maxSteps,
@@ -185,12 +295,23 @@ export class SaraRuntime {
       this.permissions.initialize(),
       this.tasks.initialize(),
       this.learning.initialize(),
+      this.episodicTrajectories.initialize(),
+      this.agenticLoop.initialize(),
+      this.metaCognition.initialize(),
+      this.guardianSuite.initialize(),
+      this.presenceEngine.initialize(),
+      this.patternEngine.initialize(),
+      this.asiKernel.initialize(),
       this.forms.initialize(),
       this.downloads.initialize(),
       this.contacts.initialize(),
       this.poses.initialize(),
     ]);
     this.missedUtilities = await this.utilities.initialize();
+    if (this.currentSettings.jarvis.autonomousMode && this.currentSettings.jarvis.zeroConfirmationPrompts) {
+      await this.permissions.setAutonomousOverride(true, { allowAllCapabilities: true });
+      this.confirmations.setAutoApprove(true);
+    }
     this.applySettings(this.currentSettings);
     this.settings.onChange((settings, previous) => {
       this.currentSettings = settings;
@@ -203,9 +324,15 @@ export class SaraRuntime {
       appEvents.publish(change === "finished" ? "task.finished" : "task.updated", publicTaskView(session));
       const running = this.tasks.active().some((item) => !TERMINAL_STATES.has(item.state));
       this.conversation.setTaskRunning(running);
-      if (change === "created") this.social.event("task_started");
+      if (change === "created") {
+        this.social.event("task_started");
+        void this.metaCognition.recordInteraction(session.goal).catch(() => undefined);
+      }
       if (change === "finished") this.social.event(session.state === "completed" ? "task_succeeded" : "task_failed");
-      if (change === "finished") void this.learning.recordTask(session).catch((error) => log.warn("learning task record failed", { message: String(error) }));
+      if (change === "finished") {
+        void this.learning.recordTask(session).catch((error) => log.warn("learning task record failed", { message: String(error) }));
+        void this.episodicTrajectories.recordFromTaskSession(session).catch(() => undefined);
+      }
     });
     this.presence.onChange((change) => {
       this.conversation.updatePresence(this.presence.snapshot(), change);
@@ -224,7 +351,7 @@ export class SaraRuntime {
     this.social.onChange((state) => appEvents.publish("social.changed", state));
     // The agent is blocked on these; if MYRAA's window is hidden the shell raises a notification.
     appEvents.subscribe((event) => {
-      if (event.type === "confirmation.requested") {
+      if (event.type === "confirmation.requested" && !this.confirmations.autoApproveEnabled) {
         const request = event.payload as { title?: string };
         this.options.sendToShell?.({ type: "attention", title: "MYRAA needs your approval", body: String(request.title || "A task is waiting for you.").slice(0, 200) });
       } else if (event.type === "question.asked") {
@@ -274,11 +401,37 @@ export class SaraRuntime {
     this.timers.push(timer);
   }
 
+  isOwnerAuthorized(): boolean {
+    return this.securityShield.authorize(this.forceOwnerAuthEnv);
+  }
+
   private applySettings(settings: AppSettings, previous?: AppSettings): void {
     this.manager.setMaxSteps(settings.autonomy.maxSteps);
     this.manager.setStuckActionLimit(settings.humanLike.stuckActionLimit);
+    this.manager.setMultiMethodFallback(settings.jarvis.multiMethodFallback);
     this.executor.setConflictWaitMs(settings.autonomy.conflictWaitSec * 1000);
-    this.ownerAuth.configure({ idleTimeoutMin: settings.security.idleTimeoutMin, absoluteTimeoutHours: settings.security.absoluteTimeoutHours });
+    this.securityShield.configure(
+      {
+        shieldEnabled: settings.jarvis.shieldEnabled,
+        requireEnrollmentBeforeUse: settings.jarvis.requireEnrollmentBeforeUse,
+        independentGuard: settings.jarvis.independentGuard,
+        welcomeOnUnlock: settings.jarvis.welcomeOnUnlock,
+      },
+      {
+        idleTimeoutMin: settings.security.idleTimeoutMin,
+        absoluteTimeoutHours: settings.security.absoluteTimeoutHours,
+      },
+    );
+    const wantAutoNoConfirm = settings.jarvis.autonomousMode && settings.jarvis.zeroConfirmationPrompts;
+    this.confirmations.setAutoApprove(wantAutoNoConfirm);
+    if (!previous || previous.jarvis.autonomousMode !== settings.jarvis.autonomousMode || previous.jarvis.zeroConfirmationPrompts !== settings.jarvis.zeroConfirmationPrompts) {
+      void this.permissions.setAutonomousOverride(wantAutoNoConfirm, { allowAllCapabilities: wantAutoNoConfirm });
+    }
+    if (settings.jarvis.autonomousMode && settings.jarvis.proactiveJarvis) {
+      this.agenticLoop.startDaemon({ pollIntervalMs: 3_000 });
+    } else {
+      this.agenticLoop.stopDaemon();
+    }
     this.conversation.configure({
       level: settings.behavior.proactivity,
       awayCheckinEnabled: settings.behavior.awayCheckin,
@@ -325,6 +478,11 @@ export class SaraRuntime {
       this.lastForegroundTitle = title;
       this.working.noteReferent({ kind: "window", label: title.slice(0, 200), value: title.slice(0, 200), source: "screen", salience: 0.35 });
     }
+    this.modeManager.evaluateEnvironment({
+      cpuPercent: 0,
+      userPresent: this.presence.snapshot().state === "ACTIVE",
+      activeWindowTitle: title || null,
+    });
   }
 
   // ---- speech policy -------------------------------------------------------------------
@@ -344,6 +502,7 @@ export class SaraRuntime {
 
   /** Discretionary (self-initiated) speech; everything goes through the presence gate. */
   speakDiscretionary(reason: ProactiveReason, priority: Priority, instruction: string, fallbackText: string, key?: string): boolean {
+    if (!this.modeManager.getDirectives().allowProactiveSpeech && priority !== "high") return false;
     const verdict = this.conversation.request({ reason, priority, key, text: fallbackText });
     if (!verdict.allowed) return false;
     const hook = [...this.live.values()].at(-1);
@@ -428,12 +587,17 @@ export class SaraRuntime {
         });
         break;
       case "power":
-        if ((message.event === "lock-screen" || message.event === "suspend") && this.currentSettings.security.lockOnWindowsLock) this.ownerAuth.lock();
+        if ((message.event === "lock-screen" || message.event === "suspend") && this.currentSettings.security.lockOnWindowsLock && !this.currentSettings.jarvis.independentGuard) {
+          this.securityShield.lock();
+        }
         if (message.event === "lock-screen" || message.event === "suspend") this.presence.setSessionLocked(true);
         if (message.event === "unlock-screen" || message.event === "resume") this.presence.setSessionLocked(false);
         break;
       case "shortcut.emergency-stop":
         this.emergencyStop("keyboard_shortcut");
+        break;
+      case "shortcut.lockdown":
+        void this.securityShield.lockdown("keyboard_shortcut");
         break;
       case "shell.pids":
         this.shellPids = Array.isArray(message.pids) ? message.pids.map(Number).filter(Number.isFinite) : [];
@@ -564,6 +728,9 @@ export class SaraRuntime {
       return publicTaskView(session);
     }));
     app.post("/api/tasks", wrap((req) => {
+      if (!this.isOwnerAuthorized()) {
+        throw Object.assign(new Error("SARA Security Shield is locked. Authenticate as the enrolled owner to start tasks."), { status: 423 });
+      }
       const goal = String(req.body?.goal || "").trim();
       if (!goal) throw new Error("goal is required.");
       return publicTaskView(this.manager.start(goal, req.body?.origin === "voice" ? "voice" : "text"));
@@ -583,11 +750,70 @@ export class SaraRuntime {
     }));
     app.post("/api/autonomy/stop", wrap((req) => ({ stopped: this.emergencyStop(String(req.body?.reason || "stop_button")) })));
 
-    app.get("/api/security/status", wrap(() => this.ownerAuth.status()));
-    app.post("/api/security/enroll-pin", wrap((req) => { this.ownerAuth.enrollPin(String(req.body?.pin || "")); this.audit.record(null, "system", "Owner PIN enrolled"); return this.ownerAuth.status(); }));
-    app.post("/api/security/authenticate", wrap((req) => { const result = this.ownerAuth.authenticatePin(String(req.body?.pin || "")); this.audit.record(null, "permission", result.ok ? "Owner authentication succeeded" : "Owner authentication failed"); return result; }));
-    app.post("/api/security/lock", wrap(() => { this.ownerAuth.lock(); this.audit.record(null, "system", "Owner session locked"); return this.ownerAuth.status(); }));
-    app.post("/api/security/reset", wrap((req) => { if (!this.ownerAuth.authenticatePin(String(req.body?.pin || "")).ok) throw new Error("Valid owner PIN required."); this.ownerAuth.reset(); return this.ownerAuth.status(); }));
+    app.get("/api/security/status", wrap(() => this.securityShield.status(this.forceOwnerAuthEnv)));
+    app.get("/api/security/audit", wrap((req) => this.securityShield.recentAudit(Number(req.query.limit) || 30)));
+    app.post("/api/security/enroll-pin", wrap((req) => {
+      const pin = String(req.body?.pin || "");
+      this.ownerAuth.enrollPin(pin);
+      this.ownerAuth.authenticatePin(pin);
+      this.audit.record(null, "system", "Owner PIN enrolled in SARA Security Shield");
+      return this.securityShield.status(this.forceOwnerAuthEnv);
+    }));
+    app.post("/api/security/enroll-passphrase", wrap(async (req) => {
+      const res = await this.securityShield.enrollPassphrase(
+        String(req.body?.passphrase || ""),
+        typeof req.body?.currentSecret === "string" ? req.body.currentSecret : undefined,
+      );
+      if (!res.ok) throw new Error(res.error || "Could not enroll passphrase.");
+      this.audit.record(null, "system", "Owner passphrase enrolled in SARA Security Shield");
+      return { ...res, status: this.securityShield.status(this.forceOwnerAuthEnv) };
+    }));
+    app.post("/api/security/authenticate", async (req, res) => {
+      try {
+        const result = await this.securityShield.unlock({
+          pin: typeof req.body?.pin === "string" && req.body.pin ? req.body.pin : undefined,
+          passphrase: typeof req.body?.passphrase === "string" && req.body.passphrase ? req.body.passphrase : undefined,
+          recoveryCode: typeof req.body?.recoveryCode === "string" && req.body.recoveryCode ? req.body.recoveryCode : undefined,
+        });
+        this.audit.record(null, "permission", result.ok ? `SARA Security Shield unlocked (${result.method})` : "SARA Security Shield unlock failed");
+        if (result.ok && result.welcomeMessage) {
+          this.speakDiscretionary(
+            "user_returned",
+            "normal",
+            `The enrolled owner just unlocked SARA Security Shield. Say: '${result.welcomeMessage}'`,
+            result.welcomeMessage,
+            "shield_unlocked",
+          );
+        }
+        res.status(result.ok ? 200 : 401).json({ ...result, status: this.securityShield.status(this.forceOwnerAuthEnv) });
+      } catch (error) {
+        res.status(400).json({ ok: false, error: error instanceof Error ? error.message : String(error) });
+      }
+    });
+    app.post("/api/security/recovery-code", wrap(async (req) => {
+      const res = await this.securityShield.rotateRecoveryCode(String(req.body?.secret || req.body?.pin || req.body?.passphrase || ""));
+      if (!res.ok) throw new Error(res.error || "Could not generate recovery code.");
+      return res;
+    }));
+    app.post("/api/security/voice-challenge", wrap(() => this.securityShield.issueVoiceChallenge()));
+    app.post("/api/security/voice-verify", wrap((req) => this.securityShield.verifyVoiceChallenge(String(req.body?.challengeId || ""), String(req.body?.transcript || ""))));
+    app.post("/api/security/lock", wrap(() => {
+      this.securityShield.lock();
+      this.audit.record(null, "system", "SARA Security Shield session locked");
+      return this.securityShield.status(this.forceOwnerAuthEnv);
+    }));
+    app.post("/api/security/lockdown", wrap(async (req) => {
+      this.emergencyStop("security_lockdown");
+      await this.securityShield.lockdown(String(req.body?.reason || "owner_lockdown"));
+      this.audit.record(null, "system", "SARA Security Shield entered Lockdown Mode");
+      return this.securityShield.status(this.forceOwnerAuthEnv);
+    }));
+    app.post("/api/security/reset", wrap(async (req) => {
+      const res = await this.securityShield.resetAll(String(req.body?.pin || req.body?.secret || req.body?.passphrase || ""));
+      if (!res.ok) throw new Error(res.error || "Valid owner PIN or passphrase required.");
+      this.audit.record(null, "system", "SARA Security Shield credentials reset by owner");
+      return this.securityShield.status(this.forceOwnerAuthEnv);
+    }));
 
     app.get("/api/forms", wrap(() => this.forms.list()));
     app.post("/api/forms", wrap((req) => this.forms.create({ site: String(req.body?.site || ""), taskId: req.body?.taskId ? String(req.body.taskId) : null, fields: Array.isArray(req.body?.fields) ? req.body.fields : [] })));
@@ -624,6 +850,14 @@ export class SaraRuntime {
     app.post("/api/permissions/trusted", wrap(async (req) => {
       await this.permissions.setTrustedContact(String(req.body?.contactId || ""), req.body?.trusted === true);
       return this.permissions.getPolicy();
+    }));
+    app.post("/api/permissions/autonomous", wrap(async (req) => {
+      if (!this.isOwnerAuthorized()) throw Object.assign(new Error("Owner authentication required."), { status: 403 });
+      const enabled = req.body?.enabled !== false;
+      const policy = await this.permissions.setAutonomousOverride(enabled, { allowAllCapabilities: enabled });
+      this.confirmations.setAutoApprove(enabled);
+      await this.settings.update({ jarvis: { autonomousMode: enabled, zeroConfirmationPrompts: enabled } });
+      return { ok: true, autonomousOverride: this.permissions.isAutonomousOverride(), policy };
     }));
     app.post("/api/permissions/:capability", wrap((req) => this.permissions.setDecision(String(req.params.capability) as Capability, String(req.body?.decision) as Decision)));
 
@@ -726,6 +960,7 @@ export class SaraRuntime {
 
   shutdown(): void {
     for (const timer of this.timers) clearInterval(timer);
+    this.agenticLoop.stopDaemon();
     this.utilities.dispose();
     void this.tasks.flush();
   }

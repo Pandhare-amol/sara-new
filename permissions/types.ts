@@ -60,7 +60,8 @@ export type MessageConfirmationMode =
   | "always_confirm"
   | "confirm_new_recipients"
   | "trusted_without_confirmation"
-  | "never_without_preview";
+  | "never_without_preview"
+  | "autonomous_no_confirm";
 
 export interface PermissionPolicy {
   version: 1;
@@ -70,6 +71,8 @@ export interface PermissionPolicy {
   trustedContacts: string[];
   /** Contact IDs a message has previously been sent to with approval. */
   knownRecipients: string[];
+  /** When enabled by the owner, bypasses interactive confirmation gates for full JARVIS autonomy. */
+  autonomousOverride?: boolean;
 }
 
 export interface PermissionVerdict {

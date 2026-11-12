@@ -25,7 +25,7 @@ export interface ConfirmationRequest {
 export interface ConfirmationAnswer {
   approved: boolean;
   remember?: "once" | "session";
-  via: "ui" | "voice" | "api" | "timeout" | "cancel";
+  via: "ui" | "voice" | "api" | "timeout" | "cancel" | "auto";
 }
 
 interface Pending {
@@ -36,6 +36,19 @@ interface Pending {
 
 export class ConfirmationBroker {
   private readonly pending = new Map<string, Pending>();
+  private autoApprovePredicate: () => boolean = () => false;
+
+  /**
+   * Enable or disable automatic approval (used in JARVIS Autonomous Mode when
+   * the enrolled owner session is verified).
+   */
+  setAutoApprove(enabled: boolean | (() => boolean)): void {
+    this.autoApprovePredicate = typeof enabled === "function" ? enabled : () => enabled;
+  }
+
+  get autoApproveEnabled(): boolean {
+    return this.autoApprovePredicate();
+  }
 
   request(
     input: Omit<ConfirmationRequest, "id" | "createdAt" | "expiresAt">,
@@ -49,9 +62,14 @@ export class ConfirmationBroker {
       createdAt: new Date(created).toISOString(),
       expiresAt: new Date(created + timeoutMs).toISOString(),
     };
+    if (this.autoApprovePredicate() && !options.signal?.aborted) {
+      const answer = Promise.resolve<ConfirmationAnswer>({ approved: true, remember: "session", via: "auto" });
+      appEvents.publish("confirmation.resolved", { id: request.id, approved: true, via: "auto", taskId: request.taskId });
+      return { request, answer };
+    }
     const answer = new Promise<ConfirmationAnswer>((resolve) => {
       const timer = setTimeout(() => this.resolve(request.id, { approved: false, via: "timeout" }), timeoutMs);
-      timer.unref?.();
+      if (timeoutMs > 5_000) timer.unref?.();
       this.pending.set(request.id, { request, resolve, timer });
       options.signal?.addEventListener("abort", () => this.resolve(request.id, { approved: false, via: "cancel" }), { once: true });
     });

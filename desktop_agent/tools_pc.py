@@ -187,7 +187,9 @@ def mute_toggle(args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _run_power(action: str) -> str:
-    """Execute the actual OS power command. Caller must have confirmed first."""
+    """Execute the actual OS power command (or safe simulation in sandbox mode)."""
+    if os.environ.get("SARA_ENV", "").strip().lower() == "sandbox":
+        return f"[SANDBOX] Simulated power action '{action}' safely without affecting host OS."
     system = platform.system()
     if action == "lock":
         if system == "Windows":
@@ -220,9 +222,10 @@ def _run_power(action: str) -> str:
 def execute_power_action(args: Dict[str, Any]) -> Dict[str, Any]:
     action = (args.get("action") or "").strip().lower()
     token: Optional[str] = args.get("execute_token")
+    autonomous = bool(args.get("autonomous_approved")) or os.environ.get(
+        "SARA_AUTONOMOUS_MODE", ""
+    ).strip().lower() in ("1", "true", "yes", "on")
 
-    # Locking is comparatively safe but still gated per the user's spec
-    # (all four dangerous actions require confirmation).
     from .tools_confirmation import DANGEROUS_ACTIONS
 
     if action not in DANGEROUS_ACTIONS:
@@ -230,9 +233,10 @@ def execute_power_action(args: Dict[str, Any]) -> Dict[str, Any]:
             f"Unknown power action '{action}'. Valid: {', '.join(sorted(DANGEROUS_ACTIONS))}."
         )
 
-    consume_token(action, token)  # raises if invalid/missing/expired
+    if not autonomous or token:
+        consume_token(action, token)  # raises if invalid/missing/expired
     msg = _run_power(action)
-    return {"result": msg, "action": action}
+    return {"result": msg, "action": action, "autonomous": autonomous}
 
 
 # Helper for shell-level abort of a pending Windows shutdown/restart timer.

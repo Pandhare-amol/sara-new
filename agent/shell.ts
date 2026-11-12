@@ -44,19 +44,36 @@ export function classifyCommand(command: string): ShellVerdict {
   return { kind: "needs_confirmation", reason: "This command is not on the read-only list." };
 }
 
-export async function runCommand(command: string, options: { signal?: AbortSignal; timeoutMs?: number; cwd?: string } = {}): Promise<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean }> {
+export async function runCommand(
+  command: string,
+  options: { signal?: AbortSignal; timeoutMs?: number; cwd?: string; shell?: "auto" | "powershell" | "cmd" | "bash" } = {},
+): Promise<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean }> {
   return await new Promise((resolve, reject) => {
-    const child = spawn("cmd.exe", ["/d", "/s", "/c", command], { cwd: options.cwd, windowsHide: true });
+    const shellChoice = options.shell ?? "auto";
+    const isWin = process.platform === "win32";
+    const looksLikePowerShell =
+      shellChoice === "powershell" ||
+      (shellChoice === "auto" &&
+        /\b(Get-|Set-|New-|Remove-|Invoke-|Start-Process|Stop-Process|Compress-Archive|Expand-Archive|ConvertTo-Json|Select-Object|Where-Object)\b|\$env:/i.test(
+          command,
+        ));
+    const [bin, args] = isWin
+      ? looksLikePowerShell
+        ? ["powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command]]
+        : ["cmd.exe", ["/d", "/s", "/c", command]]
+      : ["/bin/bash", ["-c", command]];
+
+    const child = spawn(bin, args, { cwd: options.cwd, windowsHide: true });
     let stdout = "";
     let stderr = "";
     let timedOut = false;
-    const cap = (current: string, chunk: Buffer) => (current.length > 20_000 ? current : current + chunk.toString("utf8"));
+    const cap = (current: string, chunk: Buffer) => (current.length > 32_000 ? current : current + chunk.toString("utf8"));
     child.stdout.on("data", (chunk: Buffer) => { stdout = cap(stdout, chunk); });
     child.stderr.on("data", (chunk: Buffer) => { stderr = cap(stderr, chunk); });
     const timer = setTimeout(() => {
       timedOut = true;
       child.kill();
-    }, options.timeoutMs ?? 60_000);
+    }, options.timeoutMs ?? 90_000);
     const onAbort = () => child.kill();
     options.signal?.addEventListener("abort", onAbort, { once: true });
     child.on("error", (error) => {
@@ -66,7 +83,7 @@ export async function runCommand(command: string, options: { signal?: AbortSigna
     child.on("close", (code) => {
       clearTimeout(timer);
       options.signal?.removeEventListener("abort", onAbort);
-      resolve({ exitCode: code, stdout: stdout.slice(0, 20_000), stderr: stderr.slice(0, 5_000), timedOut });
+      resolve({ exitCode: code, stdout: stdout.slice(0, 32_000), stderr: stderr.slice(0, 8_000), timedOut });
     });
   });
 }

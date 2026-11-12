@@ -22,11 +22,18 @@ const { CompanionManager } = require('./companion.cjs');
 const win32 = require('./win32.cjs');
 const path = require('path');
 const fs = require('fs');
+const isSandboxEnv = String(process.env.SARA_ENV || '').trim().toLowerCase() === 'sandbox';
+const explicitDataDir = String(process.env.SARA_DATA_DIR || '').trim();
 // Move legacy MYRAA data forward once, preserving settings, memories, and keys.
-const saraUserDataPath = path.join(app.getPath('appData'), 'Sara');
+const saraUserDataPath = explicitDataDir
+  ? path.resolve(explicitDataDir)
+  : isSandboxEnv
+    ? path.resolve('.sara-sandbox', 'electron-userdata')
+    : path.join(app.getPath('appData'), 'Sara');
 const legacyUserDataPath = path.join(app.getPath('appData'), 'MYRAA');
 try {
-  if (!fs.existsSync(saraUserDataPath) && fs.existsSync(legacyUserDataPath)) {
+  fs.mkdirSync(saraUserDataPath, { recursive: true });
+  if (!isSandboxEnv && !explicitDataDir && !fs.existsSync(path.join(saraUserDataPath, 'settings')) && fs.existsSync(legacyUserDataPath)) {
     fs.cpSync(legacyUserDataPath, saraUserDataPath, { recursive: true, errorOnExist: false });
   }
 } catch (error) {
@@ -741,18 +748,19 @@ function openLiveCoreWindow() {
   liveCoreWindow = new BrowserWindow({
     width: 1440,
     height: 900,
-    minWidth: 800,
-    minHeight: 600,
+    minWidth: 960,
+    minHeight: 640,
+    frame: false,
     show: false,
     backgroundColor: '#03050a',
     autoHideMenuBar: true,
-    title: 'SARA Live Core',
+    title: 'SARA — J.A.R.V.I.S. Core UI',
     icon: APP_ICON,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      backgroundThrottling: true,
+      backgroundThrottling: false,
     },
   });
 
@@ -974,6 +982,7 @@ let tray = null;
 let shellSettings = null;
 let registeredShortcut = null;
 let registeredAssistantShortcut = null;
+let registeredLockdownShortcut = null;
 let stopRawInput = () => undefined;
 
 function sendToBackend(message) {
@@ -1068,6 +1077,29 @@ function applyShellSettings(settings) {
       console.warn('[shell] invalid assistant shortcut:', error && error.message);
     }
   }
+  // SARA Security Shield Lockdown shortcut.
+  const lockdownAccelerator = settings.jarvis?.lockdownShortcut || 'Control+Alt+Shift+L';
+  if (lockdownAccelerator !== registeredLockdownShortcut) {
+    if (registeredLockdownShortcut) globalShortcut.unregister(registeredLockdownShortcut);
+    registeredLockdownShortcut = null;
+    try {
+      if (
+        lockdownAccelerator !== accelerator &&
+        lockdownAccelerator !== assistantAccelerator &&
+        globalShortcut.register(lockdownAccelerator, () => sendToBackend({ type: 'shortcut.lockdown' }))
+      ) {
+        registeredLockdownShortcut = lockdownAccelerator;
+      }
+    } catch (error) {
+      console.warn('[shell] invalid lockdown shortcut:', error && error.message);
+    }
+  }
+  // Sync optional JARVIS Live Core surface if selected on Windows.
+  if (process.platform === 'win32' && settings.jarvis?.surfaceMode === 'live_core' && liveCoreSurfaceExecutable()) {
+    if (!liveCoreSurfaceProcess || liveCoreSurfaceProcess.exitCode !== null) {
+      toggleLiveCoreSurface();
+    }
+  }
   updateTrayMenu();
 }
 
@@ -1104,7 +1136,7 @@ function openStudio() {
 }
 
 function ensurePackagedAutoStart() {
-  if (process.platform !== 'win32' || !app.isPackaged || process.env.SARA_DISABLE_AUTOSTART === '1') return;
+  if (process.platform !== 'win32' || !app.isPackaged || isSandboxEnv || process.env.SARA_DISABLE_AUTOSTART === '1') return;
   try {
     app.setLoginItemSettings({ path: app.getPath('exe'), args: ['--sara-background'], openAtLogin: true });
     console.log('[startup] SARA registered for automatic post-login startup.');
@@ -1115,6 +1147,10 @@ function ensurePackagedAutoStart() {
 
 function emergencyStop() {
   sendToBackend({ type: 'shortcut.emergency-stop' });
+}
+
+function triggerLockdown() {
+  sendToBackend({ type: 'shortcut.lockdown' });
 }
 
 function updateTrayMenu() {
@@ -1141,6 +1177,7 @@ function updateTrayMenu() {
     { label: 'Character Studio…', click: openStudio },
     { type: 'separator' },
     { label: `Stop all tasks (${registeredShortcut || 'no shortcut'})`, click: emergencyStop },
+    { label: `SARA Security Lockdown (${registeredLockdownShortcut || 'no shortcut'})`, click: triggerLockdown },
     { type: 'separator' },
     { label: 'Quit Sara', click: () => { isQuitting = true; app.quit(); } },
   ]));
@@ -1225,17 +1262,30 @@ function startShell() {
       ? { ok: true, available: true, status }
       : { ok: false, available: false, error: 'DesktopHost status unavailable.' };
   });
+  const resolveTrustedWindow = (event) => {
+    if (mainWindow && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents) return mainWindow;
+    if (liveCoreWindow && !liveCoreWindow.isDestroyed() && event.sender === liveCoreWindow.webContents) return liveCoreWindow;
+    return null;
+  };
   ipcMain.removeHandler('live-core:open');
   ipcMain.handle('live-core:open', (event) => {
-    if (!mainWindow || event.sender !== mainWindow.webContents) {
+    if (!resolveTrustedWindow(event)) {
       return { ok: false, error: 'Untrusted renderer.' };
     }
     openLiveCoreWindow();
     return { ok: true };
   });
+  ipcMain.removeHandler('live-core:focus-main');
+  ipcMain.handle('live-core:focus-main', (event) => {
+    if (!resolveTrustedWindow(event)) {
+      return { ok: false, error: 'Untrusted renderer.' };
+    }
+    openMainWindow();
+    return { ok: true };
+  });
   ipcMain.removeHandler('live-core:surface-status');
   ipcMain.handle('live-core:surface-status', (event) => {
-    if (!mainWindow || event.sender !== mainWindow.webContents) return { ok: false, error: 'Untrusted renderer.' };
+    if (!resolveTrustedWindow(event)) return { ok: false, error: 'Untrusted renderer.' };
     return {
       ok: true,
       supported: process.platform === 'win32',
@@ -1246,11 +1296,47 @@ function startShell() {
   });
   ipcMain.removeHandler('live-core:surface-set');
   ipcMain.handle('live-core:surface-set', (event, enabled) => {
-    if (!mainWindow || event.sender !== mainWindow.webContents) return { ok: false, error: 'Untrusted renderer.' };
+    if (!resolveTrustedWindow(event)) return { ok: false, error: 'Untrusted renderer.' };
     if (Boolean(enabled)) toggleLiveCoreSurface();
     else stopLiveCoreSurface();
     const running = Boolean(liveCoreSurfaceProcess && liveCoreSurfaceProcess.exitCode === null);
     return { ok: true, running, built: Boolean(liveCoreSurfaceExecutable()), behindIcons: false };
+  });
+  ipcMain.removeHandler('window:minimize');
+  ipcMain.handle('window:minimize', (event) => {
+    const win = resolveTrustedWindow(event);
+    if (!win) return { ok: false };
+    win.minimize();
+    return { ok: true };
+  });
+  ipcMain.removeHandler('window:maximize-toggle');
+  ipcMain.handle('window:maximize-toggle', (event) => {
+    const win = resolveTrustedWindow(event);
+    if (!win) return { ok: false, maximized: false };
+    if (win.isMaximized()) win.unmaximize();
+    else win.maximize();
+    return { ok: true, maximized: win.isMaximized() };
+  });
+  ipcMain.removeHandler('window:close');
+  ipcMain.handle('window:close', (event) => {
+    const win = resolveTrustedWindow(event);
+    if (!win) return { ok: false };
+    win.close();
+    return { ok: true };
+  });
+  ipcMain.removeHandler('window:always-on-top');
+  ipcMain.handle('window:always-on-top', (event, enabled) => {
+    const win = resolveTrustedWindow(event);
+    if (!win) return { ok: false, alwaysOnTop: false };
+    const next = typeof enabled === 'boolean' ? enabled : !win.isAlwaysOnTop();
+    win.setAlwaysOnTop(next);
+    return { ok: true, alwaysOnTop: win.isAlwaysOnTop() };
+  });
+  ipcMain.removeHandler('window:get-state');
+  ipcMain.handle('window:get-state', (event) => {
+    const win = resolveTrustedWindow(event);
+    if (!win) return { ok: false, maximized: false, alwaysOnTop: false };
+    return { ok: true, maximized: win.isMaximized(), alwaysOnTop: win.isAlwaysOnTop() };
   });
 }
 

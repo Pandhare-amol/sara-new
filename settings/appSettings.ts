@@ -32,6 +32,46 @@ export interface AppSettings {
     showTaskHud: boolean;
     keepRunningInBackground: boolean;
   };
+  /** JARVIS full-autonomy, multi-method fallback, surface preference, and SARA Security Shield controls. */
+  jarvis: {
+    /** Execute authorized tasks end-to-end without waiting on manual triggers. */
+    autonomousMode: boolean;
+    /** Auto-approve capability/tool confirmation gates when owner session is authorized. */
+    zeroConfirmationPrompts: boolean;
+    /** Proactively decompose, schedule, and advance background goals and routines. */
+    proactiveJarvis: boolean;
+    /** Automatically try secondary/tertiary execution methods when primary method fails. */
+    multiMethodFallback: boolean;
+    /** Automatically execute pending GoalManager missions without manual Start clicks. */
+    autoExecuteGoals: boolean;
+    /** Desktop UI surface mode ("companion" = classic SARA companion, "live_core" = assets/core ui JARVIS Live Core, "sara_os" = 4-Theme Morphing SARA OS). */
+    surfaceMode: "companion" | "live_core" | "sara_os";
+    /** Enable SARA's independent Security Shield for unauthorized-access protection. */
+    shieldEnabled: boolean;
+    /** Force owner PIN/passphrase enrollment before allowing any PC-control or chat actions. */
+    requireEnrollmentBeforeUse: boolean;
+    /** Manage SARA lock/unlock independently from Windows session lock events. */
+    independentGuard: boolean;
+    /** Speak or display JARVIS-style welcome briefing upon owner unlock. */
+    welcomeOnUnlock: boolean;
+    /** Instant lockdown shortcut. */
+    lockdownShortcut: string;
+  };
+  /** Project ULTRON — Owner-loyal Perimeter Armor, Hive-Mind Legion Swarm & Self-Evolution Forge. */
+  ultron: {
+    /** Enable Ultron defensive sentinel, legion swarm, and self-evolution engine. */
+    enabled: boolean;
+    /** Active operational stance. */
+    stance: "standby" | "armor" | "legion" | "evolution" | "omega_lockdown";
+    /** Minutes between automatic background perimeter scans when stance !== standby. */
+    patrolIntervalMin: number;
+    /** Default number of parallel Ultron Sentries deployed per Legion directive (2–5). */
+    maxLegionSentries: number;
+    /** Automatically verify SHA-256 cryptographic file watchpoints during perimeter scans. */
+    autoIntegrityGuard: boolean;
+    /** Enable Vibranium Skill Forge & Agent-2 failure adaptation loops. */
+    selfEvolutionEnabled: boolean;
+  };
   /** Opt-in presentation and interaction preferences; safety remains enforced elsewhere. */
   humanLike: {
     observeVerifyActions: boolean;
@@ -43,9 +83,9 @@ export interface AppSettings {
   };
   voice: {
     voiceName: string;
-    /** How she delivers lines: natural, or bright and cute (anime heroine). */
-    style: "natural" | "anime";
-    /** Raise her voice by this many semitones (0 = as Gemini speaks). */
+    /** Delivery persona: J.A.R.V.I.S. tactical chief-of-staff, natural, or bright anime heroine. */
+    style: "jarvis" | "natural" | "anime";
+    /** Raise voice pitch by semitones (0 = native voice timbre). */
     pitch: number;
     bargeIn: boolean;
     speakTaskUpdates: "all" | "important" | "none";
@@ -160,6 +200,27 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     showTaskHud: true,
     keepRunningInBackground: false,
   },
+  jarvis: {
+    autonomousMode: true,
+    zeroConfirmationPrompts: true,
+    proactiveJarvis: true,
+    multiMethodFallback: true,
+    autoExecuteGoals: true,
+    surfaceMode: "companion",
+    shieldEnabled: true,
+    requireEnrollmentBeforeUse: false,
+    independentGuard: true,
+    welcomeOnUnlock: true,
+    lockdownShortcut: "Control+Alt+Shift+L",
+  },
+  ultron: {
+    enabled: true,
+    stance: "armor",
+    patrolIntervalMin: 15,
+    maxLegionSentries: 4,
+    autoIntegrityGuard: true,
+    selfEvolutionEnabled: true,
+  },
   humanLike: {
     observeVerifyActions: true,
     smoothMouseMovement: true,
@@ -169,8 +230,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     conciseProgressUpdates: true,
   },
   voice: {
-    voiceName: "Aoede",
-    style: "natural",
+    voiceName: "Charon",
+    style: "jarvis",
     pitch: 0,
     bargeIn: true,
     speakTaskUpdates: "important",
@@ -259,7 +320,7 @@ const bool = (value: unknown, fallback: boolean) => (typeof value === "boolean" 
 export function normalizeSettings(input: unknown, base: AppSettings = DEFAULT_APP_SETTINGS): AppSettings {
   const raw = (input && typeof input === "object" ? input : {}) as Record<string, any>;
   const d = base;
-  const b = raw.behavior || {}, a = raw.autonomy || {}, h = raw.humanLike || {}, v = raw.voice || {}, c = raw.companion || {}, dh = raw.desktopHost || {}, ch = raw.character || {}, p = raw.physics || {}, pr = raw.privacy || {}, sec = raw.security || {}, pe = raw.performance || {}, dev = raw.developer || {}, gr = raw.graphics || {}, af = raw.advancedFeatures || {};
+  const b = raw.behavior || {}, a = raw.autonomy || {}, j = raw.jarvis || {}, u = raw.ultron || {}, h = raw.humanLike || {}, v = raw.voice || {}, c = raw.companion || {}, dh = raw.desktopHost || {}, ch = raw.character || {}, p = raw.physics || {}, pr = raw.privacy || {}, sec = raw.security || {}, pe = raw.performance || {}, dev = raw.developer || {}, gr = raw.graphics || {}, af = raw.advancedFeatures || {};
   return {
     version: 3,
     onboardingComplete: bool(raw.onboardingComplete, d.onboardingComplete),
@@ -274,12 +335,33 @@ export function normalizeSettings(input: unknown, base: AppSettings = DEFAULT_AP
       autoDndRecording: bool(b.autoDndRecording, d.behavior.autoDndRecording),
     },
     autonomy: {
-      maxSteps: clamp(a.maxSteps, 5, 80, d.autonomy.maxSteps),
+      maxSteps: clamp(a.maxSteps, 5, 120, d.autonomy.maxSteps),
       conflictWaitSec: clamp(a.conflictWaitSec, 1, 30, d.autonomy.conflictWaitSec),
       emergencyShortcut: typeof a.emergencyShortcut === "string" && /^[A-Za-z0-9+]{3,40}$/.test(a.emergencyShortcut) ? a.emergencyShortcut : d.autonomy.emergencyShortcut,
       assistantShortcut: typeof a.assistantShortcut === "string" && /^[A-Za-z0-9+]{3,40}$/.test(a.assistantShortcut) ? a.assistantShortcut : d.autonomy.assistantShortcut,
       showTaskHud: bool(a.showTaskHud, d.autonomy.showTaskHud),
       keepRunningInBackground: bool(a.keepRunningInBackground, d.autonomy.keepRunningInBackground),
+    },
+    jarvis: {
+      autonomousMode: bool(j.autonomousMode, d.jarvis.autonomousMode),
+      zeroConfirmationPrompts: bool(j.zeroConfirmationPrompts, d.jarvis.zeroConfirmationPrompts),
+      proactiveJarvis: bool(j.proactiveJarvis, d.jarvis.proactiveJarvis),
+      multiMethodFallback: bool(j.multiMethodFallback, d.jarvis.multiMethodFallback),
+      autoExecuteGoals: bool(j.autoExecuteGoals, d.jarvis.autoExecuteGoals),
+      surfaceMode: oneOf(j.surfaceMode, ["companion", "live_core", "sara_os"] as const, d.jarvis.surfaceMode),
+      shieldEnabled: bool(j.shieldEnabled, d.jarvis.shieldEnabled),
+      requireEnrollmentBeforeUse: bool(j.requireEnrollmentBeforeUse, d.jarvis.requireEnrollmentBeforeUse),
+      independentGuard: bool(j.independentGuard, d.jarvis.independentGuard),
+      welcomeOnUnlock: bool(j.welcomeOnUnlock, d.jarvis.welcomeOnUnlock),
+      lockdownShortcut: typeof j.lockdownShortcut === "string" && /^[A-Za-z0-9+]{3,40}$/.test(j.lockdownShortcut) ? j.lockdownShortcut : d.jarvis.lockdownShortcut,
+    },
+    ultron: {
+      enabled: bool(u.enabled, d.ultron.enabled),
+      stance: oneOf(u.stance, ["standby", "armor", "legion", "evolution", "omega_lockdown"] as const, d.ultron.stance),
+      patrolIntervalMin: Math.round(clamp(u.patrolIntervalMin, 1, 240, d.ultron.patrolIntervalMin)),
+      maxLegionSentries: Math.round(clamp(u.maxLegionSentries, 2, 5, d.ultron.maxLegionSentries)),
+      autoIntegrityGuard: bool(u.autoIntegrityGuard, d.ultron.autoIntegrityGuard),
+      selfEvolutionEnabled: bool(u.selfEvolutionEnabled, d.ultron.selfEvolutionEnabled),
     },
     humanLike: {
       observeVerifyActions: bool(h.observeVerifyActions, d.humanLike.observeVerifyActions),
@@ -291,7 +373,7 @@ export function normalizeSettings(input: unknown, base: AppSettings = DEFAULT_AP
     },
     voice: {
       voiceName: typeof v.voiceName === "string" && /^[A-Za-z]{2,24}$/.test(v.voiceName) ? v.voiceName : d.voice.voiceName,
-      style: oneOf(v.style, ["natural", "anime"] as const, d.voice.style),
+      style: oneOf(v.style, ["jarvis", "natural", "anime"] as const, d.voice.style),
       pitch: clamp(v.pitch, 0, 5, d.voice.pitch),
       bargeIn: bool(v.bargeIn, d.voice.bargeIn),
       speakTaskUpdates: oneOf(v.speakTaskUpdates, ["all", "important", "none"] as const, d.voice.speakTaskUpdates),

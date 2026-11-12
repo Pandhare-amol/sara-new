@@ -13,6 +13,7 @@ import {
   CustomThemePreset,
   HudPresentationMode,
   LiveCoreSettings,
+  SaraCoreState,
   ThemeId,
 } from './types';
 import { LiveCoreSettingsStore } from './settings/LiveCoreSettings';
@@ -28,6 +29,7 @@ import { EnergyWaves } from './components/EnergyWaves';
 import { SystemInformation } from './components/SystemInformation';
 import { FloatingIndicators } from './components/FloatingIndicators';
 import { SettingsPanel } from './components/SettingsPanel';
+import { DeckTabId, JarvisCommandDeck } from './components/JarvisCommandDeck';
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -103,6 +105,12 @@ const LiveCoreWorkspace: React.FC<LiveCoreAppProps> = ({
     settingsStore.getSettings()
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [activeDeckTab, setActiveDeckTab] = useState<DeckTabId>('command');
+  const [deckExpanded, setDeckExpanded] = useState<boolean>(true);
+  const [externalActionNonce, setExternalActionNonce] = useState<{
+    action: string;
+    nonce: number;
+  } | null>(null);
 
   const stateManager = useMemo(() => new CoreStateManager(), []);
   const colorEngine = useMemo(
@@ -209,6 +217,32 @@ const LiveCoreWorkspace: React.FC<LiveCoreAppProps> = ({
     });
   }, [settingsStore]);
 
+  const handleDockOperation = useCallback(
+    (state: SaraCoreState, voiceLevel?: number) => {
+      triggerDiagnosticState(state, voiceLevel);
+      const mapAction: Record<SaraCoreState, string> = {
+        idle: 'standby',
+        listening: 'listen',
+        thinking: 'think',
+        speaking: 'speak',
+        executing: 'execute',
+        learning: 'learn',
+        researching: 'research',
+        completed: 'completed',
+        warning: 'completed',
+        error: 'standby',
+      };
+      if (state !== 'idle') {
+        setDeckExpanded(true);
+      }
+      setExternalActionNonce({
+        action: mapAction[state],
+        nonce: Date.now(),
+      });
+    },
+    [triggerDiagnosticState]
+  );
+
   // Keyboard shortcuts: Escape closes settings drawer
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -222,6 +256,22 @@ const LiveCoreWorkspace: React.FC<LiveCoreAppProps> = ({
 
   return (
     <div ref={rootRef} className="sara-live-core-root select-none">
+      {/* Native Windows 10/11 Application Titlebar & J.A.R.V.I.S. Command Deck */}
+      <JarvisCommandDeck
+        activeTab={activeDeckTab}
+        deckExpanded={deckExpanded && settings.hudMode !== 'zen'}
+        onChangeTab={setActiveDeckTab}
+        onToggleDeckExpanded={() => setDeckExpanded((v) => !v)}
+        onSetCoreState={triggerDiagnosticState}
+        onPulseWave={pulseWaveManually}
+        onSetQualityForPowerReroute={(quality) =>
+          settingsStore.updateSettings({ quality })
+        }
+        onOpenVisualSettings={() => setSettingsOpen(true)}
+        onSwitchToExistingShell={onSwitchToExistingShell}
+        externalActionNonce={externalActionNonce}
+      />
+
       {/* Dynamic Atmospheric Nebula & Volumetric Lighting */}
       <CoreLighting
         backgroundIntensity={settings.backgroundIntensity}
@@ -267,6 +317,7 @@ const LiveCoreWorkspace: React.FC<LiveCoreAppProps> = ({
         telemetry={telemetry}
         activeState={activeState}
         clickThroughDesktopMode={settings.multiMonitor.clickThroughDesktopMode}
+        deckExpanded={deckExpanded && settings.hudMode !== 'zen'}
       />
 
       {/* Compact Micro-Buttons Dock for SARA Operations & Core Controls */}
@@ -278,7 +329,7 @@ const LiveCoreWorkspace: React.FC<LiveCoreAppProps> = ({
         clickThroughDesktopMode={settings.multiMonitor.clickThroughDesktopMode}
         micStreamActive={micStreamActive}
         autoColorCycle={settings.autoColorCycle}
-        onSelectOperation={triggerDiagnosticState}
+        onSelectOperation={handleDockOperation}
         onToggleMicReactivity={toggleMicrophoneReactivity}
         onCycleHudMode={handleCycleHudMode}
         onOpenSettings={() => setSettingsOpen(true)}
