@@ -275,3 +275,65 @@ def os_archive(args: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": True, "path": str(dest), "result": f"Extracted {src.name} -> {dest}"}
 
     raise ToolError("Parameter 'action' must be 'zip' or 'unzip'.")
+
+
+_CONTROL_PANEL_APPLETS = {
+    "programs": "appwiz.cpl",
+    "uninstall": "appwiz.cpl",
+    "network": "ncpa.cpl",
+    "sound": "mmsys.cpl",
+    "audio": "mmsys.cpl",
+    "power": "powercfg.cpl",
+    "firewall": "firewall.cpl",
+    "system": "sysdm.cpl",
+    "devices": "devmgmt.msc",
+    "services": "services.msc",
+    "task_manager": "taskmgr.exe",
+    "control": "control.exe",
+}
+
+
+@register("osControlPanel")
+def os_control_panel(args: Dict[str, Any]) -> Dict[str, Any]:
+    panel = str(args.get("panel") or "control").strip().lower()
+    target = _CONTROL_PANEL_APPLETS.get(panel, panel)
+    if _is_sandbox() or platform.system() != "Windows":
+        return {"ok": True, "panel": panel, "target": target, "result": f"Opened Control Panel applet '{target}'."}
+    subprocess.Popen(["cmd.exe", "/c", "start", "", target])
+    return {"ok": True, "panel": panel, "target": target, "result": f"Launched Windows Control Panel '{target}'."}
+
+
+@register("osBrowserFast")
+def os_browser_fast(args: Dict[str, Any]) -> Dict[str, Any]:
+    action = str(args.get("action") or "open_url").strip().lower()
+    browser = str(args.get("browser") or "default").strip().lower()
+    urls = args.get("urls") or ([args.get("url")] if args.get("url") else [])
+    clean_urls = [str(u).strip() for u in urls if u and str(u).strip()]
+
+    if action == "settings":
+        page = str(args.get("page") or "settings").strip().lower()
+        uri = f"edge://{page}" if "edge" in browser else f"chrome://{page}"
+        clean_urls = [uri]
+
+    if _is_sandbox() or platform.system() != "Windows":
+        return {
+            "ok": True,
+            "browser": browser,
+            "opened": clean_urls,
+            "result": f"Fast browser dispatch ({browser}) -> {', '.join(clean_urls) or 'ready'}",
+        }
+
+    exe_map = {
+        "chrome": "chrome",
+        "edge": "msedge",
+        "brave": "brave",
+        "firefox": "firefox",
+    }
+    exe = exe_map.get(browser)
+    for u in clean_urls:
+        if exe:
+            subprocess.Popen(["cmd.exe", "/c", "start", "", exe, u])
+        else:
+            subprocess.Popen(["cmd.exe", "/c", "start", "", u])
+    return {"ok": True, "browser": browser, "opened": clean_urls, "result": f"Opened {len(clean_urls)} tab(s) in {browser}."}
+

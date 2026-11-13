@@ -26,6 +26,16 @@ from core.three_layer_control import (
     layer2_uia_click,
     layer3_vision_see_think_act_verify,
 )
+from core.vision_phase_and_gestures import set_win32_phase_mode
+from departments import (
+    GLOBAL_RING_BUFFER,
+    assemble_and_ship_pipeline,
+    build_instant_dossier,
+    generate_live_project_diagram,
+    scan_live_system_bottlenecks,
+    scan_local_ports_and_services,
+    switch_workspace_mode,
+)
 
 load_dotenv()
 
@@ -146,6 +156,19 @@ async def ask_central_brain(user_intent: str, source: str = "hud") -> str:
             return play_music(q)
         if any(k in lower for k in ("start my work", "open my project", "open workspace")):
             return open_project_workspace("AttendEasy" if "attendeasy" in lower else "SARA")
+        if any(k in lower for k in ("diagnostic", "bottleneck", "friday")):
+            return json.dumps(scan_live_system_bottlenecks())
+        if any(k in lower for k in ("dossier", "edith", "recon", "port scan")):
+            target = user_intent.split()[-1] if len(user_intent.split()) > 1 else "localhost"
+            return json.dumps(build_instant_dossier(target, str(DB_PATH)))
+        if any(k in lower for k in ("replay", "last 30", "karen")):
+            return json.dumps(GLOBAL_RING_BUFFER.replay_last_seconds(30))
+        if "mode" in lower and any(k in lower for k in ("coding", "exam", "stealth", "presentation", "hyperspeed")):
+            return json.dumps(switch_workspace_mode(lower))
+        if any(k in lower for k in ("diagram", "wireframe", "homer", "workshop")):
+            return json.dumps(generate_live_project_diagram(str(BASE_DIR.parent.parent)))
+        if any(k in lower for k in ("assemble", "ship build")):
+            return json.dumps(assemble_and_ship_pipeline(str(BASE_DIR.parent.parent)))
         if any(k in lower for k in ("ram", "cpu", "health", "status")):
             return get_system_status()
         if "win10_pc" in ACTIVE_NODES and lower.startswith("open "):
@@ -176,6 +199,13 @@ async def ask_central_brain(user_intent: str, source: str = "hud") -> str:
                 layer1_shell_execute,
                 layer2_uia_click,
                 layer3_vision_see_think_act_verify,
+                set_win32_phase_mode,
+                scan_live_system_bottlenecks,
+                scan_local_ports_and_services,
+                build_instant_dossier,
+                switch_workspace_mode,
+                generate_live_project_diagram,
+                assemble_and_ship_pipeline,
             ],
             temperature=0.2,
         ),

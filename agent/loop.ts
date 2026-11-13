@@ -58,6 +58,14 @@ export interface TaskManagerDeps {
   maxSteps?: number;
   maxDurationMs?: number;
   stuckActionLimit?: number;
+  /** Optional <250ms deterministic Windows Settings / Multi-App / Custom Macro fast-path hook. */
+  fastExecuteHook?: (goal: string) => Promise<{
+    handled: boolean;
+    ok?: boolean;
+    latencyMs?: number;
+    spokenReply?: string;
+    summaries?: string[];
+  }>;
 }
 
 interface Control {
@@ -334,6 +342,18 @@ export class TaskManager {
     const status = (text: string) => store.setStatus(taskId, text);
 
     try {
+      // ---- Instant (<250ms) deterministic Windows Settings / Multi-App / Macro Fast-Path ----
+      if (this.deps.fastExecuteHook) {
+        const fast = await this.deps.fastExecuteHook(session.goal).catch(() => ({ handled: false as const }));
+        if (fast.handled) {
+          store.transition(taskId, "running", "Executing native OS fast-path…");
+          const ok = fast.ok !== false;
+          const summary = fast.spokenReply || (fast.summaries?.join(" ") ?? "Completed via instant OS fast-path.");
+          await this.finish(session, ok, summary);
+          return;
+        }
+      }
+
       store.transition(taskId, "planning", "Looking at the screen…");
       this.say("started", "", `Started: ${session.goal}`, "low");
 

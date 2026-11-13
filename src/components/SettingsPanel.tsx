@@ -1274,6 +1274,20 @@ function IntegrationsSection({ app, patch }: { app: AppSettings; patch: (p: AppS
             LAUNCH V.I.S.I.O.N.
           </button>
         </Row>
+        <Row
+          label="Supreme Commander Live OS & 6 AI Departments (SARA ⇄ J.A.R.V.I.S.)"
+          description="Real-time Task Manager, Installed Apps/Winget, Control Panel, Browser Controller, FRIDAY/EDITH/KAREN/HOMER Labs, Distributed Swarm & Startup-Only Verification."
+        >
+          <button
+            type="button"
+            onClick={() => {
+              window.location.href = "/?mode=command-center";
+            }}
+            className="rounded border border-cyan-400/50 bg-cyan-500/20 px-3 py-1.5 text-[10px] font-mono text-cyan-100 hover:bg-cyan-500/35 cursor-pointer"
+          >
+            LAUNCH LIVE COMMAND
+          </button>
+        </Row>
       </Group>
 
       {statusMsg && <p role="status" className="text-[11px] text-cyan-200">{statusMsg}</p>}

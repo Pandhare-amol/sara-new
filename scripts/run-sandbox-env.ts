@@ -1372,6 +1372,204 @@ async function runVerification(baseUrl: string): Promise<void> {
     return `Vision+Friday=OK, ZeroTracePhasing=Shredded, 3DBlueprint=₹${bp.blueprint.totalEstimatedBomInr}, EdithAbortRollback=Verified, SuitReroute=${suit.overallIntegrityPct}%, GriotCockpit=OK, VeronicaPod=${pod.bytes}B`;
   });
 
+  // 22. Wave 6 — Real-Time Live System Telemetry, Twin Supreme Commanders (SARA ⇄ J.A.R.V.I.S.), 6 Departments, Startup-Only Verification & Distributed /ws/swarm Worker
+  await assertCheck("22. Wave 6 — Real-Time OS Data, Twin Commanders (SARA ⇄ J.A.R.V.I.S.), 6 AI Departments, Startup Auth & Distributed /ws/swarm", async () => {
+    const statusRes = await fetch(`${baseUrl}/api/commander/status`).then((r) => r.json() as any);
+    if (!statusRes.ok || !(statusRes.system?.memory?.totalMb > 100) || !(statusRes.system?.topProcesses?.length > 0)) {
+      throw new Error(`Expected real-time live system telemetry: ${JSON.stringify(statusRes)}`);
+    }
+
+    // Switch Supreme Commander SARA -> J.A.R.V.I.S. -> SARA
+    const swJarvis = await fetch(`${baseUrl}/api/commander/switch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ commander: "jarvis" }),
+    }).then((r) => r.json() as any);
+    if (!swJarvis.ok || swJarvis.commander?.activeCommander !== "jarvis") {
+      throw new Error("Commander switch to J.A.R.V.I.S. failed");
+    }
+
+    // Connect a live Distributed Worker Node over WebSocket `/ws/swarm` and execute a delegated task on it!
+    const wsUrl = `${baseUrl.replace(/^http/, "ws")}/ws/swarm`;
+    const workerSocket = new WebSocket(wsUrl);
+    await new Promise<void>((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error("Timeout connecting to /ws/swarm")), 5000);
+      workerSocket.on("open", () => {
+        workerSocket.send(
+          JSON.stringify({
+            type: "SWARM_REGISTER",
+            nodeId: "vm-distributed-worker-2",
+            hostname: "win10-vm-node2",
+            os: "Windows 10 Pro VM",
+            arch: "x64",
+            role: "distributed_worker",
+            departments: ["FRIDAY", "EDITH", "CENTRAL_OS"],
+          }),
+        );
+      });
+      workerSocket.on("message", (raw) => {
+        const msg = JSON.parse(String(raw));
+        if (msg.type === "SWARM_WELCOME") {
+          clearTimeout(t);
+          resolve();
+        } else if (msg.type === "SWARM_TASK") {
+          workerSocket.send(
+            JSON.stringify({
+              type: "SWARM_RESULT",
+              taskId: msg.taskId,
+              nodeId: "vm-distributed-worker-2",
+              ok: true,
+              result: { spoken_report: "Remote VM Worker #2 live diagnostic nominal (RAM 41%)." },
+            }),
+          );
+        }
+      });
+      workerSocket.on("error", reject);
+    });
+
+    const remoteExec = await fetch(`${baseUrl}/api/commander/department/FRIDAY`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "scan", preferredNodeId: "vm-distributed-worker-2" }),
+    }).then((r) => r.json() as any);
+    workerSocket.close();
+
+    if (!remoteExec.ok || remoteExec.report?.executedOnNode !== "vm-distributed-worker-2") {
+      throw new Error(`Distributed worker execution failed: ${JSON.stringify(remoteExec)}`);
+    }
+
+    // Dispatch parallel 6-department mission + switch back to SARA
+    const mission = await fetch(`${baseUrl}/api/commander/dispatch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        goal: "Scan real-time processes, bottlenecks, open ports, 30s replay, repo diagram, and self-teach a Python helper",
+        departments: ["CENTRAL_OS", "FRIDAY", "EDITH", "KAREN", "WORKSHOP", "ULTRON"],
+      }),
+    }).then((r) => r.json() as any);
+
+    await fetch(`${baseUrl}/api/commander/switch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ commander: "sara" }),
+    });
+
+    if (!mission.ok || mission.departmentReports?.length !== 6) {
+      throw new Error(`6-department parallel dispatch failed: ${JSON.stringify(mission)}`);
+    }
+
+    return `LiveRAM=${statusRes.system.memory.percentUsed}%, Procs=${statusRes.system.processCount}, TwinCommanders=SARA<=>JARVIS, Depts=6/6, SwarmNode(vm-distributed-worker-2)=OK`;
+  });
+
+  await assertCheck("23. Windows 10/11 Settings Automation (<100ms Multi-App Voice Fast-Path), Anti-Attacker CSRF/Payload Shield & Full Customization (/api/windows-master/*)", async () => {
+    const wmState = await fetch(`${baseUrl}/api/windows-master/state?refresh=1`).then((r) => r.json() as any);
+    if (!wmState.ok || !wmState.state?.device?.computerName || (wmState.catalog?.length ?? 0) < 35) {
+      throw new Error(`windows-master state failed: ${JSON.stringify(wmState)}`);
+    }
+
+    // 1. Multi-step Windows Settings + App voice chain executes on instant fast-path
+    const fastChain = await fetch(`${baseUrl}/api/windows-master/voice-exec`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command: "turn on bluetooth and set brightness to 80 and open vs code" }),
+    }).then((r) => r.json() as any);
+    if (!fastChain.ok || fastChain.mode !== "instant_fast_path" || (fastChain.summaries?.length ?? 0) !== 3) {
+      throw new Error(`Multi-app fast-path failed: ${JSON.stringify(fastChain)}`);
+    }
+
+    // 2. Create & execute Custom Voice Macro
+    await fetch(`${baseUrl}/api/windows-master/macros`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        triggerPhrase: "sandbox workstation boost",
+        description: "Dark mode + Wi-Fi ON + volume 55%",
+        enabled: true,
+        steps: [
+          { kind: "setting", action: "dark_mode", target: "colors" },
+          { kind: "setting", action: "wifi_on", target: "wifi" },
+          { kind: "setting", action: "set_volume", target: "sound", value: 55 },
+        ],
+      }),
+    });
+    const macroRun = await fetch(`${baseUrl}/api/windows-master/voice-exec`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command: "sandbox workstation boost" }),
+    }).then((r) => r.json() as any);
+    if (!macroRun.ok || macroRun.mode !== "instant_fast_path") {
+      throw new Error(`Custom voice macro execution failed: ${JSON.stringify(macroRun)}`);
+    }
+
+    // 3. Simulated External Web Attacker Cross-Origin CSRF Request MUST be blocked with HTTP 403!
+    const attackerRes = await fetch(`${baseUrl}/api/windows-master/setting`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "https://evil-attacker-site.example",
+      },
+      body: JSON.stringify({ action: "bluetooth_off" }),
+    });
+    if (attackerRes.status !== 403) {
+      throw new Error(`Expected HTTP 403 against cross-origin attacker, got ${attackerRes.status}`);
+    }
+
+    const secCheck = await fetch(`${baseUrl}/api/windows-master/security`).then((r) => r.json() as any);
+    if (!secCheck.ok || (secCheck.security?.blockedAttacksCount ?? 0) < 1) {
+      throw new Error(`Blocked attack was not logged in security posture: ${JSON.stringify(secCheck)}`);
+    }
+
+    return `Catalog=${wmState.catalog.length} pages, FastChain=${fastChain.latencyMs}ms, CustomMacro=OK, AttackerCSRF=Blocked(403)`;
+  });
+
+  await assertCheck("24. Native Shell Suite, 7-Domain OS Router, Web-to-Work Browser/Form Agent, Explorer/DPI/Sleep Reconciler & 8/8 Win10/11 Acceptance (/api/shell-mastery/*)", async () => {
+    const state = await fetch(`${baseUrl}/api/shell-mastery/state`).then((r) => r.json() as any);
+    if (!state.ok || (state.domains?.length ?? 0) !== 7 || !state.readiness?.workerWHierarchy?.desktopReady) {
+      throw new Error(`shell-mastery state failed: ${JSON.stringify(state)}`);
+    }
+
+    const domainRes = await fetch(`${baseUrl}/api/shell-mastery/execute-domain`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command: "open ncpa.cpl network adapters" }),
+    }).then((r) => r.json() as any);
+    if (!domainRes.ok || domainRes.domain?.id !== "6_control_panel_cpl") {
+      throw new Error(`7-domain routing failed: ${JSON.stringify(domainRes)}`);
+    }
+
+    const acc = await fetch(`${baseUrl}/api/shell-mastery/acceptance-suite`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    }).then((r) => r.json() as any);
+    if (!acc.ok || acc.passedCount !== 8) {
+      throw new Error(`Windows 10/11 acceptance suite failed: ${JSON.stringify(acc)}`);
+    }
+
+    return `Domains=7/7, WorkerW=Verified, Acceptance=${acc.passedCount}/${acc.totalCount} (${acc.totalMs}ms), WebToWork+Vault=OK`;
+  });
+
+  await assertCheck("25. Module 18 Standalone Recovery/Self-Healing/Backups, Hindi-Hinglish Context Engine & Full 17/17 Project Completion Audit (/api/master-automation/*)", async () => {
+    const audit17 = await fetch(`${baseUrl}/api/master-automation/verify-17`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    }).then((r) => r.json() as any);
+
+    if (!audit17.ok || audit17.completedCount !== 17 || audit17.scoreLabel !== "17/17") {
+      throw new Error(`17-point automation audit failed: ${JSON.stringify(audit17)}`);
+    }
+
+    const diag = await fetch(`${baseUrl}/api/master-automation/diagnostics`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    }).then((r) => r.json() as any);
+
+    if (!diag.ok || !String(diag.formatted_report || "").includes("SARA AI RECOVERY REPORT")) {
+      throw new Error(`Self-diagnostics report failed: ${JSON.stringify(diag)}`);
+    }
+
+    return `CompletionTracker=${audit17.scoreLabel} (${audit17.totalMs}ms), RecoveryStatus=${diag.overall_status}, Hinglish+Backups+CrashGuard=Verified`;
+  });
+
   console.log("\n================================================================================");
   console.log("  SARA / J.A.R.V.I.S. + ULTRON ISOLATED SANDBOX E2E VERIFICATION REPORT");
   console.log("================================================================================");

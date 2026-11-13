@@ -81,6 +81,7 @@ import { SelfOptimizationEngine } from "./cognition/selfOptimizer";
 import { TwoAgentEvaluationCoordinator } from "./cognition/twoAgentEvaluator";
 import { UltronEngine, type UltronStance } from "./cognition/ultronEngine";
 import { WorkspaceManager } from "./sara-windows/workspaceManager";
+import { handleCommanderSwarmSocket } from "./routes/commanderSwarmRoutes";
 
 /** Set once the runtime is up; lets the Electron IPC handler reach it. */
 let runtimeRef: SaraRuntime | null = null;
@@ -309,6 +310,7 @@ let windowsBridgeRestartTimer: ReturnType<typeof setTimeout> | null = null;
 let windowsBridgeRestartAttempts = 0;
 let windowsBridgeWatchdog: ReturnType<typeof setInterval> | null = null;
 let windowsBridgeOnline = false;
+let windowsBridgeDisabledForSession = false;
 
 async function chooseWindowsBridgePort(): Promise<number> {
   if (WINDOWS_BRIDGE_PORT > 0) return WINDOWS_BRIDGE_PORT;
@@ -341,7 +343,7 @@ function windowsBridgeLocations(): { executable?: string; dll?: string } {
 }
 
 async function startWindowsBridge(): Promise<boolean> {
-  if (process.platform !== "win32") return false;
+  if (process.platform !== "win32" || windowsBridgeDisabledForSession) return false;
   const bridge = windowsBridgeLocations();
   if (!bridge.executable && !bridge.dll) return false;
   try {
@@ -360,8 +362,15 @@ async function startWindowsBridge(): Promise<boolean> {
     child.once("exit", (code, signal) => {
       if (windowsBridgeProcess === child) windowsBridgeProcess = null;
       windowsBridgeOnline = false;
+      if ((code === 2 || code === 3) && !shuttingDown) {
+        if (!windowsBridgeDisabledForSession) {
+          windowsBridgeDisabledForSession = true;
+          console.log(`[WindowsBridge] Non-admin HttpListener unavailable (code ${code}); using koffi Win32 + Python Desktop Agent.`);
+        }
+        return;
+      }
       if (code !== 0 && !shuttingDown) console.warn(`[WindowsBridge] exited (${code ?? signal ?? "unknown"}).`);
-      if (!shuttingDown && windowsBridgeRestartAttempts < 3) {
+      if (!shuttingDown && !windowsBridgeDisabledForSession && windowsBridgeRestartAttempts < 3) {
         const delay = [1000, 3000, 10000][windowsBridgeRestartAttempts++];
         if (!windowsBridgeRestartTimer) {
           windowsBridgeRestartTimer = setTimeout(() => {
@@ -399,7 +408,7 @@ function stopWindowsBridge(): void {
 function startWindowsBridgeWatchdog(): void {
   if (windowsBridgeWatchdog || process.platform !== "win32") return;
   windowsBridgeWatchdog = setInterval(() => {
-    if (shuttingDown || windowsBridgeRestartTimer) return;
+    if (shuttingDown || windowsBridgeRestartTimer || windowsBridgeDisabledForSession) return;
     void (async () => {
       if (windowsBridgeOnline && await probeWindowsBridge()) return;
       const child = windowsBridgeProcess;
@@ -1192,23 +1201,38 @@ async function startServer() {
     temperature: 0.2,
   }, { role: "background", maxQuotaWaitMs: 5_000, maxAttempts: 1 })).json);
 
-  // Local-only API surface: reject requests whose Host/Origin is not this
-  // machine (DNS-rebinding and cross-site requests from web pages).
+  // Local + owner-trusted LAN API surface: reject untrusted DNS-rebinding Host
+  // headers and cross-site browser Origin attacks, logging every blocked attempt.
   app.use((req, res, next) => {
     const host = String(req.headers.host || "");
     const origin = String(req.headers.origin || "");
+    const ip = String(req.ip || req.socket.remoteAddress || "127.0.0.1");
     const localHost = /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(host);
-    const localOrigin = !origin || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin) || origin === "null";
-    let sandboxPreviewAllowed = false;
-    if (SARA_ENV_MODE === "sandbox") {
-      try {
-        sandboxPreviewAllowed = !origin || origin === "null" || new URL(origin).host === host;
-      } catch {
-        sandboxPreviewAllowed = false;
-      }
+    const lanHost =
+      runtime.antiAttacker.getLanAccessAllowed() &&
+      /^(10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$/i.test(host);
+    const previewHost = /\.e2b\.app(:\d+)?$/i.test(host);
+    let sameOriginHost = false;
+    try {
+      sameOriginHost = Boolean(origin) && origin !== "null" && new URL(origin).host === host;
+    } catch {
+      sameOriginHost = false;
     }
-    if (!(localHost && localOrigin) && !sandboxPreviewAllowed) {
-      return res.status(403).json({ error: "Sara only accepts local requests." });
+    const localOrigin =
+      !origin ||
+      origin === "null" ||
+      /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin) ||
+      (sameOriginHost && (localHost || lanHost || previewHost || SARA_ENV_MODE === "sandbox"));
+
+    if (!((localHost || lanHost || previewHost || SARA_ENV_MODE === "sandbox") && localOrigin)) {
+      const vector = origin && !localOrigin ? "cross_origin_csrf" : "dns_rebinding";
+      runtime.antiAttacker.recordBlockedAttack(
+        vector,
+        ip,
+        req.path,
+        `Blocked ${vector} request (Host='${host}', Origin='${origin || "none"}').`,
+      );
+      return res.status(403).json({ error: "Blocked by SARA Anti-Attacker Origin/Host Shield." });
     }
     next();
   });
@@ -5357,18 +5381,29 @@ async function startServer() {
     ws.on("close", () => clearInterval(timer));
   });
 
+  // Distributed Swarm Worker Bus (`/ws/swarm`) & Real-Time Commander Telemetry (`/ws/commander-telemetry`)
+  const swarmWss = new WebSocketServer({ noServer: true });
+  swarmWss.on("connection", (ws, request) => {
+    const pathname = new URL(request.url || "", `http://${request.headers.host || "localhost"}`).pathname;
+    handleCommanderSwarmSocket(pathname, ws, runtime);
+  });
+
   server.on("upgrade", (request, socket, head) => {
     const pathname = new URL(request.url || '', `http://${request.headers.host || 'localhost'}`).pathname;
     const origin = String(request.headers.origin || "");
     const host = String(request.headers.host || "");
 
-    // Allow hardware/IoT/mobile spoke nodes & Holographic Prism displays on /ws/col/* and /ws/holo
+    // Allow hardware/IoT/mobile spoke nodes, Holographic Prism displays & Distributed Swarm Workers
     if (pathname.startsWith("/ws/col/")) {
       colWss.handleUpgrade(request, socket, head, (ws) => colWss.emit("connection", ws, request));
       return;
     }
     if (pathname === "/ws/holo") {
       holoWss.handleUpgrade(request, socket, head, (ws) => holoWss.emit("connection", ws, request));
+      return;
+    }
+    if (pathname === "/ws/swarm" || pathname === "/ws/commander-telemetry") {
+      swarmWss.handleUpgrade(request, socket, head, (ws) => swarmWss.emit("connection", ws, request));
       return;
     }
 

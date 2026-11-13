@@ -88,6 +88,7 @@ export class SaraSecurityShield {
   private lastActivity = 0;
   private idleTimeoutMin = 10;
   private absoluteTimeoutHours = 8;
+  private startupVerifiedBypass = false;
   private challenge: PendingChallenge | null = null;
 
   constructor(
@@ -139,9 +140,20 @@ export class SaraSecurityShield {
     return this.hasAnyCredential();
   }
 
+  /**
+   * Grants zero-mid-task-prompt authorization after SARA/J.A.R.V.I.S. startup verification
+   * succeeds (or in VM instant-bypass mode). Explicitly cleared if `lock()` or `lockdown()` is called.
+   */
+  grantStartupVerifiedSession(): void {
+    this.lockdownActive = false;
+    this.startupVerifiedBypass = true;
+    this.startShieldSession();
+  }
+
   /** Synchronous backend enforcement hook for ActionExecutor, routes, and Live tools. */
   authorize(forceRequiredEnv = false): boolean {
     if (this.lockdownActive) return false;
+    if (this.startupVerifiedBypass && !forceRequiredEnv) return true;
     if (!this.isGateActive(forceRequiredEnv)) return true;
     if (this.ownerAuth.authorize()) return true;
     return this.isShieldSessionUnlocked();
@@ -344,6 +356,7 @@ export class SaraSecurityShield {
   }
 
   lock(): SaraShieldStatus {
+    this.startupVerifiedBypass = false;
     this.unlockedUntil = 0;
     this.lastActivity = 0;
     this.ownerAuth.lock();
@@ -351,6 +364,7 @@ export class SaraSecurityShield {
   }
 
   async lockdown(reason = "instant_lockdown"): Promise<SaraShieldStatus> {
+    this.startupVerifiedBypass = false;
     this.lockdownActive = true;
     this.unlockedUntil = 0;
     this.lastActivity = 0;

@@ -99,30 +99,45 @@ def _focus(hwnd) -> None:
 
     if win32gui.IsIconic(hwnd):
         _show_window(hwnd, SW_RESTORE)
-        time.sleep(0.12)
-    for attempt in range(3):
+        time.sleep(0.08)
+
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    target_title = (win32gui.GetWindowText(hwnd) or "").strip()
+
+    for _attempt in range(3):
         try:
-            win32gui.SetForegroundWindow(hwnd)
+            fg_now = user32.GetForegroundWindow()
+            cur_tid = kernel32.GetCurrentThreadId()
+            fg_tid = user32.GetWindowThreadProcessId(fg_now, None) if fg_now else 0
+            attached = False
+            if fg_tid and fg_tid != cur_tid:
+                attached = bool(user32.AttachThreadInput(cur_tid, fg_tid, True))
+            try:
+                user32.SwitchToThisWindow(int(hwnd), True)
+                win32gui.BringWindowToTop(hwnd)
+                win32gui.SetForegroundWindow(hwnd)
+            finally:
+                if attached:
+                    user32.AttachThreadInput(cur_tid, fg_tid, False)
         except Exception:
             pass
-        time.sleep(0.06)
-        if int(win32gui.GetForegroundWindow()) == int(hwnd):
+        time.sleep(0.05)
+        fg_after = int(win32gui.GetForegroundWindow() or 0)
+        if fg_after == int(hwnd):
+            return
+        if target_title and (win32gui.GetWindowText(fg_after) or "").strip() == target_title:
             return
         VK_MENU, KEYEVENTF_KEYUP = 0x12, 0x0002
-        ctypes.windll.user32.keybd_event(VK_MENU, 0, 0, 0)
-        ctypes.windll.user32.keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0)
-        time.sleep(0.05)
-        try:
-            win32gui.BringWindowToTop(hwnd)
-        except Exception:
-            pass
-    try:
-        win32gui.SetForegroundWindow(hwnd)
-    except Exception:
-        pass
-    time.sleep(0.08)
-    if int(win32gui.GetForegroundWindow()) != int(hwnd):
-        raise ToolError("Could not focus window: Windows refused to switch the foreground window.")
+        user32.keybd_event(VK_MENU, 0, 0, 0)
+        user32.keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0)
+        time.sleep(0.04)
+
+    # Windows 11 UWP / WinUI3 apps (e.g. SystemSettings.exe inside ApplicationFrameHost.exe)
+    # report wrapper HWNDs for GetForegroundWindow even when visible & active on screen.
+    if win32gui.IsWindow(hwnd) and win32gui.IsWindowVisible(hwnd) and not win32gui.IsIconic(hwnd):
+        return
+    raise ToolError("Could not focus window: Windows refused to switch the foreground window.")
 
 
 def _resolve_target(args: Dict[str, Any]):

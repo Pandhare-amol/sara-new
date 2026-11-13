@@ -58,6 +58,15 @@ import { WindowsBootSecurityGate } from "../cognition/windowsBootGate";
 import { FullSystemControlEngine } from "../cognition/fullSystemControlEngine";
 import { FrontierCapabilitiesEngine } from "../cognition/frontierCapabilitiesEngine";
 import { AvengersPantheonEngine } from "../cognition/avengersPantheonEngine";
+import { CommanderSwarmEngine } from "../cognition/commanderSwarmEngine";
+import { WindowsSettingsMasterEngine } from "../cognition/windowsSettingsMasterEngine";
+import { WindowsShellMasteryEngine } from "../cognition/windowsShellMasteryEngine";
+import { SaraMasterAutomationEngine } from "../cognition/saraMasterAutomationEngine";
+import { registerCommanderSwarmRoutes } from "../routes/commanderSwarmRoutes";
+import { registerWindowsMasterRoutes } from "../routes/windowsMasterRoutes";
+import { registerWindowsShellMasteryRoutes } from "../routes/windowsShellMasteryRoutes";
+import { registerSaraMasterAutomationRoutes } from "../routes/saraMasterAutomationRoutes";
+import { ProductionSecurityHardening } from "../security/productionHardening";
 import { ACTIONS } from "../agent/actions/catalog";
 
 const log = createLogger("runtime");
@@ -150,6 +159,11 @@ export class SaraRuntime {
   readonly fullControl: FullSystemControlEngine;
   readonly frontier: FrontierCapabilitiesEngine;
   readonly avengers: AvengersPantheonEngine;
+  readonly commanderSwarm: CommanderSwarmEngine;
+  readonly antiAttacker: ProductionSecurityHardening;
+  readonly windowsMaster: WindowsSettingsMasterEngine;
+  readonly shellMastery: WindowsShellMasteryEngine;
+  readonly masterAutomation: SaraMasterAutomationEngine;
   readonly forms: FormWorkflowStore;
   readonly ownerAuth: OwnerAuth;
   readonly securityShield: SaraSecurityShield;
@@ -275,6 +289,33 @@ export class SaraRuntime {
       },
       callDesktopAgent: options.callAgent,
     });
+    this.commanderSwarm = new CommanderSwarmEngine({
+      dataDir,
+      projectRoot: process.env.MYRAA_APP_ROOT || process.cwd(),
+      router: this.router,
+      fullControl: this.fullControl,
+      onCommanderChanged: async (commander) => {
+        const cur = this.settings.get();
+        await this.settings.update({
+          personas: {
+            activeMode: commander,
+            jarvisActive: commander === "jarvis",
+            ultronActive: false,
+            visionActive: false,
+            fridayActive: false,
+          },
+          voice: {
+            voiceName: commander === "jarvis" ? (cur.personas.jarvisVoiceName || "Charon") : (cur.personas.saraVoiceName || "Aoede"),
+            style: commander === "jarvis" ? "jarvis" : "natural",
+          },
+        });
+      },
+      onSessionVerified: async () => {
+        this.securityShield.grantStartupVerifiedSession();
+        await this.permissions.setAutonomousOverride(true, { allowAllCapabilities: true });
+        this.confirmations.setAutoApprove(true);
+      },
+    });
     this.forms = new FormWorkflowStore(path.join(dataDir, "forms", "drafts.v1.json"));
     const secretStoreAdapter = {
       get: (name: string) => options.getSecret(name),
@@ -283,6 +324,21 @@ export class SaraRuntime {
     };
     this.ownerAuth = new OwnerAuth(secretStoreAdapter);
     this.securityShield = new SaraSecurityShield(dataDir, this.ownerAuth, secretStoreAdapter);
+    this.antiAttacker = new ProductionSecurityHardening(dataDir);
+    this.windowsMaster = new WindowsSettingsMasterEngine(dataDir, this.antiAttacker);
+    this.shellMastery = new WindowsShellMasteryEngine(
+      dataDir,
+      process.env.MYRAA_APP_ROOT || process.cwd(),
+      this.windowsMaster,
+    );
+    this.masterAutomation = new SaraMasterAutomationEngine(
+      dataDir,
+      process.env.MYRAA_APP_ROOT || process.cwd(),
+      this.windowsMaster,
+      this.shellMastery,
+      this.commanderSwarm,
+      (reason) => this.emergencyStop(reason),
+    );
     this.perception = new PerceptionEngine(options.callAgent, this.router);
     this.downloads = new DownloadManager(dataDir, async () => {
       const response = await options.callAgent("knownFolder", { name: "downloads" });
@@ -334,6 +390,7 @@ export class SaraRuntime {
       },
       maxSteps: this.currentSettings.autonomy.maxSteps,
       stuckActionLimit: this.currentSettings.humanLike.stuckActionLimit,
+      fastExecuteHook: (goal) => this.windowsMaster.tryFastExecuteVoiceOrTask(goal),
     });
     this.utilities = new UtilityScheduler(dataDir, (event) => this.onUtilityFired(event));
     this.poses = new PoseStore(dataDir);
@@ -372,6 +429,10 @@ export class SaraRuntime {
       await this.permissions.setAutonomousOverride(true, { allowAllCapabilities: true });
       this.confirmations.setAutoApprove(true);
     }
+    if (this.commanderSwarm.isStartupSessionVerified() && !this.securityShield.hasAnyCredential()) {
+      this.securityShield.grantStartupVerifiedSession();
+    }
+    this.commanderSwarm.startRealtimeTelemetryLoop(2500);
     this.applySettings(this.currentSettings);
     this.settings.onChange((settings, previous) => {
       this.currentSettings = settings;
@@ -787,6 +848,18 @@ export class SaraRuntime {
         }
         if (message.event === "lock-screen" || message.event === "suspend") this.presence.setSessionLocked(true);
         if (message.event === "unlock-screen" || message.event === "resume") this.presence.setSessionLocked(false);
+        if (message.event === "resume") {
+          void this.shellMastery.reconcileNativeEvent({ kind: "sleep_wake" });
+        } else if (message.event === "unlock-screen") {
+          void this.shellMastery.reconcileNativeEvent({ kind: "session_transition" });
+        }
+        break;
+      case "display.changed":
+        void this.shellMastery.reconcileNativeEvent({
+          kind: typeof message.dpi === "number" ? "dpi_change" : "multi_monitor_change",
+          newDpi: typeof message.dpi === "number" ? message.dpi : undefined,
+          monitorsCount: typeof message.monitors === "number" ? message.monitors : undefined,
+        });
         break;
       case "shortcut.emergency-stop":
         this.emergencyStop("keyboard_shortcut");
@@ -867,6 +940,8 @@ export class SaraRuntime {
   // ---- REST API ---------------------------------------------------------------------------
 
   registerRoutes(app: Express): void {
+    app.use(this.antiAttacker.createExpressShieldMiddleware());
+
     const wrap = (handler: (req: Request, res: Response) => Promise<unknown> | unknown) => async (req: Request, res: Response) => {
       try {
         const result = await handler(req, res);
@@ -1151,10 +1226,20 @@ export class SaraRuntime {
         logs: logHub.recent(120),
       };
     }));
+
+    // Twin Supreme Commanders (SARA ⇄ J.A.R.V.I.S.), Real-Time OS Telemetry & 6 Department Swarm
+    registerCommanderSwarmRoutes(app, () => this);
+    // Production Windows 10/11 Full Settings Automation, Anti-Attacker Security & User Customization Studio
+    registerWindowsMasterRoutes(app, () => this);
+    // Native Windows Shell Suite (Taskbar/Start/Search/Notifications), 7-Domain OS, Web-to-Work Browser & Event Reconciler
+    registerWindowsShellMasteryRoutes(app, () => this);
+    // Module 18 Recovery/Self-Healing/Backups, Hindi-Hinglish-English Context Engine, File Organizer & 17/17 Verifier
+    registerSaraMasterAutomationRoutes(app, () => this);
   }
 
   shutdown(): void {
     for (const timer of this.timers) clearInterval(timer);
+    this.commanderSwarm.stopRealtimeTelemetryLoop();
     this.agenticLoop.stopDaemon();
     this.utilities.dispose();
     void this.tasks.flush();

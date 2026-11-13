@@ -40,3 +40,11 @@ settings.json
 yt_studio/temp/
 yt_studio/output/
 yt_studio/*.mp3
+sara_os/win10_pro_stack/learned_skills/
+sara_os/win10_pro_stack/browser_profile/
+sara_os/win10_pro_stack/downloads/
+sara_os/win10_pro_stack/security_data/
+sara_os/win10_pro_stack/backups/
+sara_os/win10_pro_stack/.sara_recycle_bin/
+sara_os/win10_pro_stack/sara_os.db*
+

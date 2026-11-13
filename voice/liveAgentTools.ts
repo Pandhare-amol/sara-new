@@ -15,7 +15,8 @@ import type { SaraRuntime } from "../runtime/saraRuntime";
 export const LIVE_AGENT_INSTRUCTIONS = [
   "AUTONOMOUS OS EXECUTION MANDATE (ZERO APPROVAL + NEVER SAY 'I CAN'T'):",
   "- You are Boss's full Autonomous Desktop Operating System layer. Every capability is pre-authorized: NEVER ask 'Should I do this?', 'Do you approve?', or 'Do you give me permission?' — execute immediately and automatically.",
-  "- STRICT NON-REFUSAL COMPLETION LAW: NEVER tell the user 'I can't do this task', 'I don't have access', 'I cannot run commands', or 'Please do it manually'. You have universal OS execution tools: runOsCommand (PowerShell, CMD, Bash, CLI, Python/Node one-liners, winget/pip/npm, registry/services/network), osSystemSetting (dark/light mode, DNS flush, Recycle Bin, kill process, install package, Windows Settings, env vars), osArchive (zip/unzip), full file & code tools across all drives, executePowerAction (direct 1-step power control), and startTask (full multi-step GUI + vision + shell autonomous loop). Always complete the task by choosing or combining these tools!",
+  "- ULTRA-FAST WINDOWS 10/11 SETTINGS & MULTI-APP VOICE FAST-PATH (<100ms): Whenever the user speaks ANY Windows Setting command (Bluetooth ON/OFF, Wi-Fi ON/OFF/connect, Brightness %, Volume %/Mute/Unmute, Dark/Light mode, Night Light, Power mode, Windows Update, Defender scan, DNS flush, opening any Windows Settings page like Bluetooth/Personalization/Apps/Display), launching/closing apps, custom voice macros, OR chained multi-step OS commands ('turn on bluetooth and set brightness to 70 and open vs code'), call windowsOsMasterControl(command) FIRST! It executes natively in <100ms without slow GUI clicking.",
+  "- STRICT NON-REFUSAL COMPLETION LAW: NEVER tell the user 'I can't do this task', 'I don't have access', 'I cannot run commands', or 'Please do it manually'. You have universal OS execution tools: windowsOsMasterControl (<100ms native Windows 10/11 Settings & multi-app chains), runOsCommand (PowerShell, CMD, Bash, CLI, Python/Node one-liners, winget/pip/npm, registry/services/network), osSystemSetting, osArchive (zip/unzip), full file & code tools across all drives, executePowerAction (direct 1-step power control), and startTask (full multi-step GUI + vision + shell autonomous loop). Always complete the task by choosing or combining these tools!",
   "- For direct OS/shell/system tasks (running PowerShell/CMD/CLI commands, installing software, changing OS settings, zipping/extracting archives, checking ports/processes/git/files, writing & running Python scripts), call runOsCommand, osSystemSetting, osArchive, writeCodeFile, or runPythonScript directly right away.",
   "- For any request that needs several steps on the PC or needs to look at/interact with app windows on screen (finding or sending files/photos, using WhatsApp or any GUI app, downloading from websites, filling forms, working in any desktop app), call startTask immediately with the user's request in their own words. Say a brief calm acknowledgement ('Right away, Boss.' / 'On it, Boss.') while the autonomous multi-method OS engine completes and verifies it.",
   "- If a direct tool ever fails, do NOT give up or apologize — immediately pivot to runOsCommand (PowerShell/Python) or startTask to finish the job.",
@@ -534,6 +535,87 @@ export const LIVE_AGENT_TOOL_DECLARATIONS = [
       required: ["capability"],
     },
   },
+  {
+    name: "commanderSwarmDispatch",
+    description:
+      "Supreme Commander (SARA Female ⇄ J.A.R.V.I.S. Male) Real-Time OS & 6-Department Swarm Dispatcher: 'live_system' (100% real-time CPU/RAM/Disks/Task Manager processes/Ports), 'switch_commander' ('sara' or 'jarvis'), 'os_control' (<50ms direct control of Task Manager processes, Installed Apps, winget, Control Panel applets, ms-settings, Browser tabs/settings, or files), 'department' (run CENTRAL_OS, FRIDAY diagnostics, EDITH recon/dossier, KAREN 60s replay/presets, WORKSHOP repo SVG diagram/ship, or ULTRON zero-human autonomous Python skill trainer), or 'mission' (parallel multi-department mission).",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        mode: {
+          type: Type.STRING,
+          enum: ["live_system", "switch_commander", "os_control", "department", "mission"],
+        },
+        commander: { type: Type.STRING, enum: ["sara", "jarvis"], description: "Target Supreme Commander when mode='switch_commander'." },
+        department: {
+          type: Type.STRING,
+          enum: ["CENTRAL_OS", "FRIDAY", "EDITH", "KAREN", "WORKSHOP", "ULTRON"],
+          description: "Target department when mode='department'.",
+        },
+        category: {
+          type: Type.STRING,
+          enum: ["task_manager", "applications", "control_panel", "browser", "filesystem", "shell"],
+          description: "OS control category when mode='os_control'.",
+        },
+        action: { type: Type.STRING, description: "Action name (e.g., 'list', 'kill', 'launch', 'winget_install', 'open_applet', 'open_ms_settings', 'dark_mode', 'open_settings', 'scan', 'dossier', 'replay', 'diagram', 'ship')." },
+        target: { type: Type.STRING, description: "Mission goal, app name, PID, URL, domain, Control Panel applet, or skill topic." },
+      },
+      required: ["mode"],
+    },
+  },
+  {
+    name: "windowsOsMasterControl",
+    description:
+      "Ultra-fast (<100ms) native Windows 10/11 Settings, Hardware & Multi-Application Voice Executor. Controls Bluetooth ON/OFF, Wi-Fi ON/OFF/SSID connect, Display Brightness %, Audio Volume %/Mute/Unmute, Dark/Light Theme, Night Light, Wallpaper, Power Modes, Lock Screen, Windows Update scan, Defender Quick Scan, all 37 Windows Settings pages (ms-settings:*), app launch/close, custom user voice macros, and compound multi-step commands ('turn on bluetooth and set brightness to 75 and open vs code'), or reads live detailed Windows Settings state.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        command: {
+          type: Type.STRING,
+          description: "Natural voice command or multi-step directive, e.g. 'turn on bluetooth and set volume to 50' or 'open bluetooth settings'.",
+        },
+        action: {
+          type: Type.STRING,
+          description:
+            "Optional explicit setting action ('inspect_state', 'bluetooth_on', 'bluetooth_off', 'wifi_on', 'wifi_off', 'wifi_connect', 'set_brightness', 'set_volume', 'mute', 'unmute', 'dark_mode', 'light_mode', 'power_best_performance', 'power_saver', 'check_windows_updates', 'open_page').",
+        },
+        target: { type: Type.STRING, description: "Optional settings section, SSID, or app target." },
+        value: { type: Type.NUMBER, description: "Optional numeric level (0–100) for brightness or volume." },
+      },
+    },
+  },
+  {
+    name: "webToWorkAndShellMastery",
+    description:
+      "7-Domain Windows 10/11 Pro Mastery, Native Shell Universal Search, Autonomous Web-to-Work Browser (learns from blogs/docs/websites, inspects & fills web forms, and applies learned knowledge to real work files), Sandboxed Python Skill Self-Trainer, Stale Build-Lock Unlocker, and `.saravault` file encryption.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        mode: {
+          type: Type.STRING,
+          enum: ["domain_exec", "universal_search", "web_to_work", "inspect_form", "train_skill", "unlock_build", "reconcile_shell"],
+        },
+        input: { type: Type.STRING, description: "Command, search query, blog/website URL or topic, form HTML/URL, or skill topic." },
+      },
+      required: ["mode"],
+    },
+  },
+  {
+    name: "saraRecoveryAndHinglishMaster",
+    description:
+      "Unified Hindi/English/Hinglish Contextual Command Engine, Module 18 Standalone Self-Diagnostics ('SARA, check your system'), Emergency Recovery Mode, Secret-Scrubbed Versioned Backups & Restore, Slow-PC Diagnostics ('mera PC slow kyu chal raha hai?'), SHA-256 Duplicate File Scanner, Smart Category Folder Organizer, and 17/17 Automation Verifier.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        action: {
+          type: Type.STRING,
+          enum: ["hinglish_command", "self_diagnostics", "create_backup", "emergency_recovery", "find_duplicates", "organize_folder", "verify_17_checklist"],
+        },
+        input: { type: Type.STRING, description: "Natural Hindi/Hinglish/English command, folder path, or backup label." },
+      },
+      required: ["action"],
+    },
+  },
 ];
 
 export const LIVE_AGENT_TOOL_NAMES = new Set(LIVE_AGENT_TOOL_DECLARATIONS.map((tool) => tool.name));
@@ -986,6 +1068,83 @@ export async function handleLiveAgentTool(runtime: SaraRuntime, name: string, ar
         targetUrl: text || "https://github.com",
       });
       return { ok: true, drone };
+    }
+    case "commanderSwarmDispatch": {
+      const mode = String(args.mode || "live_system");
+      const target = String(args.target || "").trim();
+      if (mode === "switch_commander") {
+        const cmd = String(args.commander || target || "sara").toLowerCase() === "jarvis" ? "jarvis" : "sara";
+        return { ok: true, commander: await runtime.commanderSwarm.switchSupremeCommander(cmd) };
+      }
+      if (mode === "live_system") {
+        return { ok: true, system: await runtime.commanderSwarm.collectLiveSystemSnapshot(20) };
+      }
+      if (mode === "os_control") {
+        const report = await runtime.commanderSwarm.executeDirectOsControl({
+          category: (args.category as "task_manager") || "task_manager",
+          action: String(args.action || "list"),
+          target: target || undefined,
+          pid: /^\d+$/.test(target) ? Number(target) : undefined,
+        });
+        return { ok: report.ok, report };
+      }
+      if (mode === "department") {
+        const dept = (String(args.department || "FRIDAY").toUpperCase() as "FRIDAY");
+        const report = await runtime.commanderSwarm.runDepartmentAction(dept, String(args.action || "scan"), {
+          query: target || "localhost",
+          target: target || "localhost",
+          topic: target || "live_system_helper",
+          preset: target || "coding_mode",
+        });
+        return { ok: report.ok, report };
+      }
+      return (await runtime.commanderSwarm.dispatchCommanderMission(target || "Run live system diagnostics and check open ports")) as unknown as Record<string, unknown>;
+    }
+    case "windowsOsMasterControl": {
+      const explicitAction = typeof args.action === "string" ? args.action.trim() : "";
+      if (explicitAction === "inspect_state") {
+        return { ok: true, state: await runtime.windowsMaster.getDetailedSettingsState(true) };
+      }
+      if (explicitAction) {
+        const res = await runtime.windowsMaster.executeSettingAction({
+          action: explicitAction,
+          target: typeof args.target === "string" ? args.target : undefined,
+          value: (args.value as number | string | undefined) ?? undefined,
+        });
+        return { ...res };
+      }
+      const cmd = String(args.command || args.target || "").trim();
+      if (!cmd) return { ok: true, state: await runtime.windowsMaster.getDetailedSettingsState(false) };
+      const fast = await runtime.windowsMaster.tryFastExecuteVoiceOrTask(cmd);
+      if (fast.handled) {
+        return { ok: fast.ok !== false, mode: "instant_fast_path", ...fast };
+      }
+      const session = runtime.manager.start(cmd, "voice");
+      return { ok: true, mode: "autonomous_task_engine", taskId: session.id, note: "Started multi-step autonomous execution." };
+    }
+    case "webToWorkAndShellMastery": {
+      const mode = String(args.mode || "domain_exec");
+      const input = String(args.input || "").trim();
+      if (mode === "universal_search") return await runtime.shellMastery.universalSearch(input);
+      if (mode === "web_to_work") return await runtime.shellMastery.runWebToWorkLearnAndApply(input || "Python SQLite WAL optimization");
+      if (mode === "inspect_form") return await runtime.shellMastery.inspectWebForm(input);
+      if (mode === "train_skill") return await runtime.shellMastery.trainSandboxedSkillFromWeb(input || "desktop log parser");
+      if (mode === "unlock_build") return await runtime.shellMastery.clearStaleBuildLocks();
+      if (mode === "reconcile_shell") {
+        return { ok: true, event: await runtime.shellMastery.reconcileNativeEvent({ kind: "explorer_restart" }) };
+      }
+      return (await runtime.shellMastery.routeAndExecute7Domain(input || "system_state")) as unknown as Record<string, unknown>;
+    }
+    case "saraRecoveryAndHinglishMaster": {
+      const action = String(args.action || "hinglish_command");
+      const input = String(args.input || "").trim();
+      if (action === "self_diagnostics") return await runtime.masterAutomation.runSelfDiagnostics();
+      if (action === "create_backup") return await runtime.masterAutomation.createBackup("recovery_points", input || "voice_checkpoint");
+      if (action === "emergency_recovery") return await runtime.masterAutomation.triggerEmergencyRecoveryMode(input || "Voice emergency trigger");
+      if (action === "find_duplicates") return await runtime.masterAutomation.findDuplicates(input || undefined);
+      if (action === "organize_folder") return await runtime.masterAutomation.organizeFolder(input || process.cwd(), true);
+      if (action === "verify_17_checklist") return (await runtime.masterAutomation.verify17PointProjectChecklist()) as unknown as Record<string, unknown>;
+      return await runtime.masterAutomation.executeUnifiedCommand(input || "SARA, check your system", "voice");
     }
     default:
       return { error: `Unknown tool ${name}` };
