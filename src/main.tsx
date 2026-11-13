@@ -50,6 +50,11 @@ const GriotRemoteCockpitView = lazy(() =>
     default: module.GriotRemoteCockpitView,
   })),
 );
+const LiveDepartmentCommandView = lazy(() =>
+  import('./central_os/LiveDepartmentCommandView.tsx').then((module) => ({
+    default: module.LiveDepartmentCommandView,
+  })),
+);
 
 type SurfaceMode = 'companion' | 'live_core' | 'ultron' | 'vision' | 'sara_os' | 'central_os';
 
@@ -66,6 +71,7 @@ const pathname = location.pathname.replace(/\/+$/, '') || '/';
 const isCompanion = urlMode === 'companion';
 const isEdithRoute = pathname === '/edith' || urlMode === 'edith';
 const isGriotRoute = pathname === '/remote-cockpit' || urlMode === 'remote-cockpit';
+const isCommandCenterRoute = pathname === '/command-center' || urlMode === 'command-center';
 const forceLiveCore = urlMode === 'live-core';
 const forceUltron = urlMode === 'ultron';
 const forceVision = urlMode === 'vision';
@@ -213,6 +219,14 @@ function RootSurfaceRouter() {
         <div className="h-screen w-screen bg-[#050314] p-2">
           <GriotRemoteCockpitView onBack={() => { window.location.href = '/'; }} />
         </div>
+      </Suspense>
+    );
+  }
+
+  if (isCommandCenterRoute) {
+    return (
+      <Suspense fallback={null}>
+        <LiveDepartmentCommandView standalone />
       </Suspense>
     );
   }

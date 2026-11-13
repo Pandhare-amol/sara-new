@@ -24,6 +24,7 @@ import {
   playSaraWelcomeSequence,
   type BootGateStatusView,
 } from './SaraBootSecurityGate';
+import { LiveDepartmentCommandView } from './LiveDepartmentCommandView';
 import { SaraAudioSession, type LiveState } from '../lib/saraAudio';
 import { SettingsPanel as SaraGlobalSettingsPanel } from '../components/SettingsPanel';
 import { api, type AppSettings, type AppSettingsPatch } from '../lib/appApi';
@@ -72,8 +73,8 @@ export const CentralOsApp: React.FC<CentralOsAppProps> = ({ onSwitchSurface }) =
   const [nodes, setNodes] = useState<ColNode[]>([]);
   const [wallpaperMode, setWallpaperMode] = useState(false);
   const [activeTab, setActiveTab] = useState<
-    'wallpaper_hud' | 'layers_trainer' | 'frontier_suite' | 'nodes' | 'win10_plan'
-  >('wallpaper_hud');
+    'live_command' | 'wallpaper_hud' | 'layers_trainer' | 'frontier_suite' | 'nodes' | 'win10_plan'
+  >('live_command');
 
   // Wave 4: 3-Layer Control + Smart Half-Task + Autonomous Skill Trainer
   const [layerGoal, setLayerGoal] = useState('Check git status cleanly via Layer 1 Shell');
@@ -495,6 +496,7 @@ export const CentralOsApp: React.FC<CentralOsAppProps> = ({ onSwitchSurface }) =
         {/* Center Tabs */}
         <nav className="flex flex-wrap items-center gap-1.5">
           {[
+            ['live_command', '⚡ Live OS & 6 Depts'],
             ['wallpaper_hud', 'Live Wallpaper HUD'],
             ['layers_trainer', `3-Layer & Self-Trainer (${masteredSkills.length})`],
             ['frontier_suite', 'Coworker & Frontier'],
@@ -1469,6 +1471,12 @@ export const CentralOsApp: React.FC<CentralOsAppProps> = ({ onSwitchSurface }) =
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {activeTab === 'live_command' && (
+          <div className="mx-auto max-w-[1480px] p-4">
+            <LiveDepartmentCommandView />
           </div>
         )}
       </main>

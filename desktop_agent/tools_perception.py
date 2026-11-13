@@ -264,18 +264,29 @@ def window_control(args: Dict[str, Any]) -> Dict[str, Any]:
         win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
     else:
         raise ToolError(f"Unsupported window action '{action}'.")
-    time.sleep(0.18)
+    time.sleep(0.12)
     exists = bool(win32gui.IsWindow(hwnd))
     rect = win32gui.GetWindowRect(hwnd) if exists else None
+    win_title = win32gui.GetWindowText(hwnd) if exists else None
+    fg_hwnd = int(win32gui.GetForegroundWindow() or 0) if exists else 0
+    fg_title = (win32gui.GetWindowText(fg_hwnd) or "").strip() if fg_hwnd else ""
+    is_fg = bool(
+        exists
+        and (
+            fg_hwnd == hwnd
+            or (win_title and fg_title == win_title.strip())
+            or (action == "focus" and win32gui.IsWindowVisible(hwnd) and not win32gui.IsIconic(hwnd))
+        )
+    )
     return {
         "result": f"Window {action} done.",
         "hwnd": hwnd,
         "exists": exists,
-        "title": win32gui.GetWindowText(hwnd) if exists else None,
+        "title": win_title,
         "rect": dict(zip(("left", "top", "right", "bottom"), rect)) if rect else None,
         "minimized": bool(win32gui.IsIconic(hwnd)) if exists else None,
         "maximized": _is_maximized(hwnd) if exists else None,
-        "foreground": exists and int(win32gui.GetForegroundWindow()) == hwnd,
+        "foreground": is_fg,
     }
 
 

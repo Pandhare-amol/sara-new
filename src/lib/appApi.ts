@@ -327,6 +327,94 @@ export const api = {
   avengersAction: (subpath: string, body?: Record<string, unknown>) =>
     request<Record<string, any>>("POST", `/api/avengers/${subpath}`, body || {}),
 
+  // Supreme Commanders (SARA ⇄ J.A.R.V.I.S.), Real-Time OS Telemetry & 6-Department Swarm
+  commanderStatus: (live = true) =>
+    request<Record<string, any>>("GET", `/api/commander/status?live=${live ? "1" : "0"}`),
+  commanderLiveSystem: (limit = 35) =>
+    request<Record<string, any>>("GET", `/api/commander/live-system?limit=${limit}`),
+  commanderInstalledApps: (refresh = false) =>
+    request<Record<string, any>>("GET", `/api/commander/installed-apps?refresh=${refresh ? "1" : "0"}`),
+  commanderSwitch: (commander: "sara" | "jarvis") =>
+    request<Record<string, any>>("POST", "/api/commander/switch", { commander }),
+  commanderStartupAuth: () =>
+    request<Record<string, any>>("GET", "/api/commander/startup-auth"),
+  commanderStartupAuthConfig: (body: Record<string, unknown>) =>
+    request<Record<string, any>>("POST", "/api/commander/startup-auth/config", body),
+  commanderStartupAuthVerify: (body: Record<string, unknown>) =>
+    request<Record<string, any>>("POST", "/api/commander/startup-auth/verify", body),
+  commanderOsControl: (body: Record<string, unknown>) =>
+    request<Record<string, any>>("POST", "/api/commander/os-control", body),
+  commanderRunDepartment: (department: string, body: Record<string, unknown>) =>
+    request<Record<string, any>>("POST", `/api/commander/department/${encodeURIComponent(department)}`, body),
+  commanderDispatchMission: (goal: string, departments?: string[]) =>
+    request<Record<string, any>>("POST", "/api/commander/dispatch", { goal, departments }),
+  commanderSwarmNodes: () =>
+    request<Record<string, any>>("GET", "/api/commander/swarm/nodes"),
+
+  // Windows 10/11 Full Settings Automation, Anti-Attacker Security & Customization Studio
+  windowsMasterState: (refresh = false) =>
+    request<Record<string, any>>("GET", `/api/windows-master/state?refresh=${refresh ? "1" : "0"}`),
+  windowsMasterSetting: (body: { action: string; target?: string; value?: string | number }) =>
+    request<Record<string, any>>("POST", "/api/windows-master/setting", body),
+  windowsMasterVoiceExec: (command: string) =>
+    request<Record<string, any>>("POST", "/api/windows-master/voice-exec", { command }),
+  windowsMasterUpdateCustomization: (patch: Record<string, unknown>) =>
+    request<Record<string, any>>("POST", "/api/windows-master/customization", patch),
+  windowsMasterUpsertMacro: (body: Record<string, unknown>) =>
+    request<Record<string, any>>("POST", "/api/windows-master/macros", body),
+  windowsMasterDeleteMacro: (id: string) =>
+    request<Record<string, any>>("DELETE", `/api/windows-master/macros/${encodeURIComponent(id)}`),
+  windowsMasterUpsertAlias: (body: { alias: string; target: string; kind: "app" | "url" | "folder" }) =>
+    request<Record<string, any>>("POST", "/api/windows-master/aliases", body),
+  windowsMasterDeleteAlias: (alias: string) =>
+    request<Record<string, any>>("DELETE", `/api/windows-master/aliases/${encodeURIComponent(alias)}`),
+  windowsMasterSecurity: () =>
+    request<Record<string, any>>("GET", "/api/windows-master/security"),
+
+  // Native Windows Shell Suite (Taskbar/Start/Search/Notifications), 7-Domain OS, Web-to-Work & Acceptance
+  shellMasteryState: () =>
+    request<Record<string, any>>("GET", "/api/shell-mastery/state"),
+  shellMasterySearch: (q: string) =>
+    request<Record<string, any>>("GET", `/api/shell-mastery/search?q=${encodeURIComponent(q)}`),
+  shellMasteryConfig: (body: Record<string, unknown>) =>
+    request<Record<string, any>>("POST", "/api/shell-mastery/config", body),
+  shellMasteryMarkRead: () =>
+    request<Record<string, any>>("POST", "/api/shell-mastery/notifications/read-all"),
+  shellMasteryExecuteDomain: (command: string) =>
+    request<Record<string, any>>("POST", "/api/shell-mastery/execute-domain", { command }),
+  shellMasteryUnlockBuild: () =>
+    request<Record<string, any>>("POST", "/api/shell-mastery/unlock-build"),
+  shellMasteryInspectForm: (urlOrHtml: string) =>
+    request<Record<string, any>>("POST", "/api/shell-mastery/web-inspect-form", { urlOrHtml }),
+  shellMasteryWebToWork: (directive: string, outputFileName?: string) =>
+    request<Record<string, any>>("POST", "/api/shell-mastery/web-to-work", { directive, outputFileName }),
+  shellMasteryTrainSkill: (topic: string) =>
+    request<Record<string, any>>("POST", "/api/shell-mastery/train-skill", { topic }),
+  shellMasteryReconcile: (kind: string, extra: Record<string, unknown> = {}) =>
+    request<Record<string, any>>("POST", "/api/shell-mastery/reconcile", { kind, ...extra }),
+  shellMasteryRunAcceptance: () =>
+    request<Record<string, any>>("POST", "/api/shell-mastery/acceptance-suite"),
+
+  // Module 18 Recovery/Self-Healing/Backups, Hindi-Hinglish-English Context Engine, File Manager & 17/17 Audit
+  masterAutoState: () =>
+    request<Record<string, any>>("GET", "/api/master-automation/state"),
+  masterAutoCommand: (command: string, channel: "voice" | "text" = "text") =>
+    request<Record<string, any>>("POST", "/api/master-automation/command", { command, channel }),
+  masterAutoPolicy: (patch: Record<string, unknown>) =>
+    request<Record<string, any>>("POST", "/api/master-automation/policy", patch),
+  masterAutoDuplicates: (folderPath?: string) =>
+    request<Record<string, any>>("POST", "/api/master-automation/files/duplicates", { folderPath }),
+  masterAutoOrganize: (folderPath: string, dryRun = true) =>
+    request<Record<string, any>>("POST", "/api/master-automation/files/organize", { folderPath, dryRun }),
+  masterAutoDiagnostics: () =>
+    request<Record<string, any>>("POST", "/api/master-automation/diagnostics"),
+  masterAutoBackup: (bucket: string, label: string) =>
+    request<Record<string, any>>("POST", "/api/master-automation/backup", { bucket, label }),
+  masterAutoEmergency: (exit = false) =>
+    request<Record<string, any>>("POST", "/api/master-automation/emergency", { exit }),
+  masterAutoVerify17: () =>
+    request<Record<string, any>>("POST", "/api/master-automation/verify-17"),
+
   characters: () => request<CharacterSummary[]>("GET", "/api/characters"),
 };
 
